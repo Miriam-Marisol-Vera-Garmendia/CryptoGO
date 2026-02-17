@@ -87,10 +87,68 @@ Un atacante no debe poder forzar al sistema a “descifrar primero y verificar d
 - Sus dependencias criptográficas no están modificadas de manera maliciosa.
 
 ## **6. Revisión de la superficie de ataque**
-Enumere todos los puntos de entrada con los que un atacante podría interactuar.
-Para cada uno, describa brevemente:
+### Entrada de archivos
 * ¿Qué podría salir mal?
+  - Carga de archivos excesivamente grandes (denegación de servicio).
+  - Uso de rutas maliciosas.
+  - Ingreso de datos corruptos o formatos inesperados.
+
 * ¿Qué propiedad de seguridad está en riesgo?
+  - Disponibilidad.
+  - Integridad del sistema.
+---
+### Análisis de metadatos
+* ¿Qué podría salir mal?
+  - Manipulación de la lista de destinatarios.
+  - Alteración del algoritmo o versión del contenedor.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Integridad.
+  - Autenticidad.
+---
+### Importación / exportación de llaves
+* ¿Qué podría salir mal?
+  - Sustitución de llaves públicas por llaves maliciosas.
+  - Exfiltración de llaves privadas.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Confidencialidad.
+  - Autenticidad.
+---
+### Ingreso de contraseñas
+* ¿Qué podría salir mal?
+  - Uso de contraseñas débiles.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Confidencialidad.
+---
+### Flujo de compartición
+* ¿Qué podría salir mal?
+  - Ataques Man-in-the-Middle que alteren el contenedor cifrado.
+  - Sustitución de la llave pública del destinatario.
+  - Modificación de los destinatarios autorizados.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Confidencialidad.
+  - Autenticidad.
+---
+### Verificación de firmas
+* ¿Qué podría salir mal?
+  - Aceptar firmas inválidas.
+  - Verificar después del descifrado.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Integridad.
+  - Autenticidad.
+---
+### Argumentos de la línea de comandos (CLI)
+* ¿Qué podría salir mal?
+  - Contraseñas como texto en la línea de comandos.
+  - Sobrescritura accidental de archivos.
+
+* ¿Qué propiedad de seguridad está en riesgo?
+  - Confidencialidad.
+  - Integridad operativa.
 
 ## **7. Restricciones de diseño derivadas de los requisitos**
 | **Requisito** | **Restricción de diseño** |
