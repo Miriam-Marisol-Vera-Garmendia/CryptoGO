@@ -33,6 +33,7 @@ La bóveda garantiza que si un atacante obtiene acceso al contenedor cifrado o a
   - Protección frente a adversarios con capacidades de cómputo cuántico.
 
 ## **2. Diagrama de arquitectura**
+![Diagrama de Arquitectura](https://github.com/user-attachments/assets/60cb5be4-17b1-44ac-acbd-e62ad2f949b0)
 
 ## **3. Requisitos de seguridad**
 * Confidencialidad del contenido:  
