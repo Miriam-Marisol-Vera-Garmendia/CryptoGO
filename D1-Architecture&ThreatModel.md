@@ -35,9 +35,40 @@ Resuelve la protección de documentos y su compartición con usuarios que hayan 
 Enumere explícitamente las propiedades de seguridad que su sistema debe proporcionar.
 
 ## **4. Modelo de amenazas**
+**Activos - ¿Que se protege?**
+- Documentos cifrados.
+- Llaves simétricas
+- Llaves privadas.
+- Credenciales de autenticación
+- Integridad de los datos.
+- Contraseñas utilizadas para proteger llaves.
+- Firmas digitales asociadas a cada documento
+- Sistema de respaldo y recuperación de llaves.
+  
+  **Activos secuendario**
+  - Código fuente del sistema.
+  - Metadatos de los documentos (nombre, fecha, propietario)
+  - Historial de acceso o compartición
+  - Repositorio GitHub del proyecto.
+
+**Amenazas - ¿Contra quienes nos defendemos?**
+- Atacantes que puedan interceptar, leer o modificar la información.
+- Atacantes externos.
+- Usuarios no autorizados o autenticados
+- Robo de llaves privadas almacenadas sin protección adecuada.
+- Ataques de fuerza bruta contra contraseñas que protegen las llaves.
+- Exposición de llaves simétricas
+- Alteración de llaves públicas.
+- Suplantación de identidad mediante llaves falsas
+- Pérdida de llaves sin mecanismo de recuperación.
+- Falta de validación de integridad en respaldo de llaves
 
 ## **5. Supuestos de confianza**
-Declare explícitamente qué asume su sistema.
+- El usuario protege su contraseña, es decir, que no la comparte y no es trivial
+- El sistema operativo brinda aleatoriedad segura (CSPRNG) para las claves y nonces (no usa RNG débil)
+- Las llaves públicas de los destinatarios son auténticas puesto que se obtienen por un canal confiable desde un inicio
+- El almacenamiento ya sea local o remoto es no confiable puesto que puede leer, modificar o borrar contenedores
+- Sus dependencias criptográficas no están modificadas de manera maliciosa
 
 ## **6. Revisión de la superficie de ataque**
 Enumere todos los puntos de entrada con los que un atacante podría interactuar.
