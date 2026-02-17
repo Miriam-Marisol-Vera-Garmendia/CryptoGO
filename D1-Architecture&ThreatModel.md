@@ -93,4 +93,16 @@ Para cada uno, describa brevemente:
 * ¿Qué propiedad de seguridad está en riesgo?
 
 ## **7. Restricciones de diseño derivadas de los requisitos**
-Muestre cómo los requisitos se traducen en decisiones arquitectónicas.
+| **Requisito** | **Restricción de diseño** |
+| ------------- | ------------------------- |
+| Confindecialidad del archivo | Usar AEAD para cifrar contenido con una clave unica por cada archivo |
+| Integridad | AEAD con validación estricta, un rechazo sin falla |
+| Autenticidad del remitente | Implementaciond e firmas digitales sobre los contenedores |
+| Verificación previa | Antes del decifrado verificar que cumpla el siguiente flujo: verificar firma -> desenvolver clave -> AEAD descrypt |
+| Compartición con multiples destinitarios | Cuenta con cifrado híbrido, envolviendo la clave de sesión para cada receptor con su clave pública |
+| Resitencia de ataques por nonce | Un NONCE único por cifrado, prohibiendo la reutilización |
+
+
+
+
+
