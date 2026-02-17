@@ -1,6 +1,6 @@
 # **Architecture & Threat Model**
 ## **Objetivo**
-Diseñar el Secure Digital Document Vault a nivel de sistema antes de implementar la criptografía.
+Diseñar la Bóbeda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
 Este entregable asegura que su equipo:
 - Comprenda qué propiedades de seguridad debe proporcionar el sistema
 - Identifique atacantes realistas
@@ -9,11 +9,27 @@ Este entregable asegura que su equipo:
 - Ninguna criptografía sólida puede compensar una arquitectura débil.
 
 ## **1. Descripción general del sistema**
-* ¿Qué problema resuelve su bóveda?
+* ¿Qué problema resuelve la bóveda?  
+Resuelve la protección de documentos y su compartición con usuarios que hayan sido previamente autenticados. 
 * ¿Cuáles son las funcionalidades principales?
-* ¿Qué está explícitamente fuera del alcance del sistema?
+  - El sistema debe permitir compartir archivos de forma segura con varios usuarios.
+  - Se requiere un mecanismo de respaldo para las llaves criptográficas.
+  - La autenticidad de los documentos debe garantizarse mediante firmas digitales obligatorias.
+  - Las llaves deben gestionarse usando funciones KDF.
+  - Es necesario implementar un proceso de recuperación de llaves.
+  - Antes de descifrar cualquier archivo, la firma digital debe validarse.
+  - Cada archivo debe protegerse usando cifrado autenticado (AEAD).
+  - Se debe generar una llave simétrica independiente para cada archivo.
+  - Las llaves simétricas deben protegerse mediante cifrado híbrido utilizando las llaves públicas de los destinatarios.
 
-## **2. Diagrama de arquitectura (Obligatorio)**
+* ¿Qué NO está dentro del alcance de la boveda?  
+  - Defender contra un SO comprometido.
+  - Un atacante con acceso a los dispositivos.
+  - Proteger la información debido a malas prácticas de seguridad de los usuarios.
+  - Recuperación de llaves sin un respaldo.
+  - Protección frente a adversarios con capacidades de cómputo cuántico.
+
+## **2. Diagrama de arquitectura**
 
 ## **3. Requisitos de seguridad**
 Enumere explícitamente las propiedades de seguridad que su sistema debe proporcionar.
