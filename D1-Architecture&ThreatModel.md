@@ -48,7 +48,11 @@ Enumere explícitamente las propiedades de seguridad que su sistema debe proporc
 - Falta de validación de integridad en respaldo de llaves
 
 ## **5. Supuestos de confianza**
-Declare explícitamente qué asume su sistema.
+- El usuario protege su contraseña, es decir, que no la comparte y no es trivial
+- El sistema operativo brinda aleatoriedad segura (CSPRNG) para las claves y nonces (no usa RNG débil)
+- Las llaves públicas de los destinatarios son auténticas puesto que se obtienen por un canal confiable desde un inicio
+- El almacenamiento ya sea local o remoto es no confiable puesto que puede leer, modificar o borrar contenedores
+- Sus dependencias criptográficas no están modificadas de manera maliciosa
 
 ## **6. Revisión de la superficie de ataque**
 Enumere todos los puntos de entrada con los que un atacante podría interactuar.
