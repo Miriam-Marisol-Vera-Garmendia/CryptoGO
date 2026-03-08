@@ -1,6 +1,6 @@
-# **Architecture & Threat Model**
+# **D1-Architecture & Threat Model**
 ## **Objetivo**
-Diseñar la Bóbeda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
+Diseñar la Bóveda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
 Este entregable asegura que su equipo:
 - Comprenda qué propiedades de seguridad debe proporcionar el sistema
 - Identifique atacantes realistas
@@ -161,7 +161,47 @@ Un atacante no debe poder forzar al sistema a “descifrar primero y verificar d
 | Compartición con multiples destinitarios | Cuenta con cifrado híbrido, envolviendo la clave de sesión para cada receptor con su clave pública |
 | Resitencia de ataques por nonce | Un NONCE único por cifrado, prohibiendo la reutilización |
 
+# **D2-Secure Symmetric Encryption Module**
+## **Objetivo**
+Implementar un módulo de cifrado seguro de archivos que garantice:
+- Confidencialidad
+- Integridad
+- Detección de manipulación
+Utilizando cifrado autenticado moderno.
+Este módulo se convierte en el núcleo criptográfico del Secure Digital Document Vault (Bóveda Segura de Documentos Digitales).
+En esta etapa, tu sistema cifra archivos únicamente para un solo propietario (aún no hay funcionalidad para compartir archivos)
 
+## **1. Cifrado seguro de archivos**
 
+## **2. AEAD obligatorio**
+Se usa ChaCha20-Poly1305 debido a que proporciona:
+- Confidencialidad del contenido
+- Integridad del ciphertext
+-Autenticación de metadatos mediante AAD
 
+## **3. Gestión de nonce/IV**
 
+## **4. Protección de metadatos**
+
+## **5. Detección de manipulación**
+
+## **6. Aleatoriedad segura**
+Para garantizar la generación segura de valores aleatorios en el sistema se utilizan las fuentes de aleatoriedad proporcionadas como lo son:
+- ChaCha20Poly1305.generate_key(): Esta función nos generara una clave criptográfica segura utilizando un generador de números aleatorios criptográficamente seguro.  
+- os.urandom(12): Esta función se utiliza para generar un nonce de 12 bytes.
+El nonce generado se utiliza en el algoritmo ChaCha20-Poly1305, donde deberá ser único para cada operación de cifrado con la misma clave.
+
+## **7. Decisiones de seguridad**
+* ¿Por qué usar AEAD en lugar de “cifrado + hash”?
+Se debe a que AEAD resuelve correctamente confidencialidad e integridad autenticada en una sola construcción, evitando errores comunes como:
+  - Verificación después de descrifrar.
+  - Hashear el plaintext en lugar del ciphertext.
+  - Utilización de un MAC sin vincular metadatos.
+
+* ¿Qué ocurre si el nonce se repite?
+Al utilizar ChaCha20-Poly1035 el reutilizar un nonce con la misma clave compromete la seguridad, debido a ello el nonce deberá ser único por cifrado.
+
+* ¿Contra qué atacante se defiende el sistema?
+  - Alguien que puede leer el almacenamiento.
+  - Alguien que intente forzar descifrando con datos alterados.
+  - Alguien que puede mnodificar el contenedor.
