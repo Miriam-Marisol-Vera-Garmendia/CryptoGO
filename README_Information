@@ -172,6 +172,23 @@ Este módulo se convierte en el núcleo criptográfico del Secure Digital Docume
 En esta etapa, tu sistema cifra archivos únicamente para un solo propietario (aún no hay funcionalidad para compartir archivos)
 
 ## **1. Cifrado seguro de archivos**
+El sistema cifra archivos utilizando ChaCha20-Poly1305, un algoritmo moderno de cifrado autenticado que combina cifrado simétrico con verificación de integridad.
+
+El proceso de cifrado sigue los siguientes pasos:
+
+1. Se genera una clave secreta segura de 256 bits.
+2. Se genera un nonce único de 12 bytes para cada operación de cifrado.
+3. Se definen metadatos autenticados (AAD) que no serán cifrados pero sí protegidos contra manipulación.
+4. El archivo original es cifrado utilizando ChaCha20.
+5. Se genera automáticamente una etiqueta de autenticación (Poly1305) que permite verificar la integridad del contenido durante el descifrado.
+
+El resultado del proceso incluye:
+* Nonce
+* Metadatos autenticados
+* Ciphertext
+* Tag de autenticación
+
+Esto garantiza que el archivo almacenado en la bóveda esté protegido contra lectura o modificación no autorizada.
 
 ## **2. AEAD obligatorio**
 Se usa ChaCha20-Poly1305 debido a que proporciona:
@@ -180,10 +197,45 @@ Se usa ChaCha20-Poly1305 debido a que proporciona:
 -Autenticación de metadatos mediante AAD
 
 ## **3. Gestión de nonce/IV**
+El algoritmo ChaCha20-Poly1305 requiere un nonce de 96 bits (12 bytes).
+
+Para cada operación de cifrado:
+1. Se genera un nonce único usando os.urandom(12).
+2. El nonce no necesita mantenerse secreto, pero nunca debe repetirse con la misma clave.
+
+El nonce se almacena junto con el archivo cifrado dentro del contenedor de la bóveda para que pueda utilizarse durante el proceso de descifrado.
 
 ## **4. Protección de metadatos**
+El sistema protege ciertos metadatos utilizando AAD (Additional Authenticated Data).
+
+Ejemplos de metadatos protegidos:
+
+* Nombre del archivo
+* Fecha de creación
+* Identificador del documento
+* Tamaño original del archivo
+
+Estos metadatos no se cifran, pero sí se incluyen en el proceso de autenticación.
+Si un atacante intenta modificarlos, el proceso de descifrado fallará.
+
+Esto evita ataques donde se manipula información contextual del archivo almacenado.
 
 ## **5. Detección de manipulación**
+
+ChaCha20-Poly1305 genera automáticamente una etiqueta de autenticación (authentication tag) mediante el algoritmo Poly1305.
+
+Durante el proceso de descifrado:
+
+1. El sistema verifica la autenticidad del ciphertext y de los metadatos.
+2. Si los datos han sido modificados, el algoritmo produce un error.
+3. El archivo no se descifra.
+
+Esto permite detectar:
+
+* Modificación del ciphertext
+* Alteración de metadatos
+* Corrupción del archivo
+* Intentos de ataque por manipulación del contenedor
 
 ## **6. Aleatoriedad segura**
 Para garantizar la generación segura de valores aleatorios en el sistema se utilizan las fuentes de aleatoriedad proporcionadas como lo son:
