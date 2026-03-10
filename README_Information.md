@@ -1,6 +1,6 @@
-# **Architecture & Threat Model**
+# **D1-Architecture & Threat Model**
 ## **Objetivo**
-Diseñar la Bóbeda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
+Diseñar la Bóveda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
 Este entregable asegura que su equipo:
 - Comprenda qué propiedades de seguridad debe proporcionar el sistema
 - Identifique atacantes realistas
@@ -33,6 +33,7 @@ La bóveda garantiza que si un atacante obtiene acceso al contenedor cifrado o a
   - Protección frente a adversarios con capacidades de cómputo cuántico.
 
 ## **2. Diagrama de arquitectura**
+![Diagrama de Arquitectura](https://github.com/user-attachments/assets/60cb5be4-17b1-44ac-acbd-e62ad2f949b0)
 
 ## **3. Requisitos de seguridad**
 * Confidencialidad del contenido:  
@@ -160,7 +161,99 @@ Un atacante no debe poder forzar al sistema a “descifrar primero y verificar d
 | Compartición con multiples destinitarios | Cuenta con cifrado híbrido, envolviendo la clave de sesión para cada receptor con su clave pública |
 | Resitencia de ataques por nonce | Un NONCE único por cifrado, prohibiendo la reutilización |
 
+# **D2-Secure Symmetric Encryption Module**
+## **Objetivo**
+Implementar un módulo de cifrado seguro de archivos que garantice:
+- Confidencialidad
+- Integridad
+- Detección de manipulación
+Utilizando cifrado autenticado moderno.
+Este módulo se convierte en el núcleo criptográfico del Secure Digital Document Vault (Bóveda Segura de Documentos Digitales).
+En esta etapa, tu sistema cifra archivos únicamente para un solo propietario (aún no hay funcionalidad para compartir archivos)
 
+## **1. Cifrado seguro de archivos**
+El sistema cifra archivos utilizando ChaCha20-Poly1305, un algoritmo moderno de cifrado autenticado que combina cifrado simétrico con verificación de integridad.
 
+El proceso de cifrado sigue los siguientes pasos:
 
+1. Se genera una clave secreta segura de 256 bits.
+2. Se genera un nonce único de 12 bytes para cada operación de cifrado.
+3. Se definen metadatos autenticados (AAD) que no serán cifrados pero sí protegidos contra manipulación.
+4. El archivo original es cifrado utilizando ChaCha20.
+5. Se genera automáticamente una etiqueta de autenticación (Poly1305) que permite verificar la integridad del contenido durante el descifrado.
 
+El resultado del proceso incluye:
+* Nonce
+* Metadatos autenticados
+* Ciphertext
+* Tag de autenticación
+
+Esto garantiza que el archivo almacenado en la bóveda esté protegido contra lectura o modificación no autorizada.
+
+## **2. AEAD obligatorio**
+Se usa ChaCha20-Poly1305 debido a que proporciona:
+- Confidencialidad del contenido
+- Integridad del ciphertext
+-Autenticación de metadatos mediante AAD
+
+## **3. Gestión de nonce/IV**
+El algoritmo ChaCha20-Poly1305 requiere un nonce de 96 bits (12 bytes).
+
+Para cada operación de cifrado:
+1. Se genera un nonce único usando os.urandom(12).
+2. El nonce no necesita mantenerse secreto, pero nunca debe repetirse con la misma clave.
+
+El nonce se almacena junto con el archivo cifrado dentro del contenedor de la bóveda para que pueda utilizarse durante el proceso de descifrado.
+
+## **4. Protección de metadatos**
+El sistema protege ciertos metadatos utilizando AAD (Additional Authenticated Data).
+
+Ejemplos de metadatos protegidos:
+
+* Nombre del archivo
+* Fecha de creación
+* Identificador del documento
+* Tamaño original del archivo
+
+Estos metadatos no se cifran, pero sí se incluyen en el proceso de autenticación.
+Si un atacante intenta modificarlos, el proceso de descifrado fallará.
+
+Esto evita ataques donde se manipula información contextual del archivo almacenado.
+
+## **5. Detección de manipulación**
+
+ChaCha20-Poly1305 genera automáticamente una etiqueta de autenticación (authentication tag) mediante el algoritmo Poly1305.
+
+Durante el proceso de descifrado:
+
+1. El sistema verifica la autenticidad del ciphertext y de los metadatos.
+2. Si los datos han sido modificados, el algoritmo produce un error.
+3. El archivo no se descifra.
+
+Esto permite detectar:
+
+* Modificación del ciphertext
+* Alteración de metadatos
+* Corrupción del archivo
+* Intentos de ataque por manipulación del contenedor
+
+## **6. Aleatoriedad segura**
+Para garantizar la generación segura de valores aleatorios en el sistema se utilizan las fuentes de aleatoriedad proporcionadas como lo son:
+- ChaCha20Poly1305.generate_key(): Esta función nos generara una clave criptográfica segura utilizando un generador de números aleatorios criptográficamente seguro.  
+- os.urandom(12): Esta función se utiliza para generar un nonce de 12 bytes.
+El nonce generado se utiliza en el algoritmo ChaCha20-Poly1305, donde deberá ser único para cada operación de cifrado con la misma clave.
+
+## **7. Decisiones de seguridad**
+* ¿Por qué usar AEAD en lugar de “cifrado + hash”?
+Se debe a que AEAD resuelve correctamente confidencialidad e integridad autenticada en una sola construcción, evitando errores comunes como:
+  - Verificación después de descrifrar.
+  - Hashear el plaintext en lugar del ciphertext.
+  - Utilización de un MAC sin vincular metadatos.
+
+* ¿Qué ocurre si el nonce se repite?
+Al utilizar ChaCha20-Poly1035 el reutilizar un nonce con la misma clave compromete la seguridad, debido a ello el nonce deberá ser único por cifrado.
+
+* ¿Contra qué atacante se defiende el sistema?
+  - Alguien que puede leer el almacenamiento.
+  - Alguien que intente forzar descifrando con datos alterados.
+  - Alguien que puede mnodificar el contenedor.
