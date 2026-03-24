@@ -5,5 +5,6 @@ Implementación de una bóveda digital segura para el cifrado, compartición y v
 - Casillas Herrera Leonardo Didier - Tester/QA
 - Flores Melquiades Evelyn Jasmin - Líder del proyecto
 - Vera Garmendia Miriam Marisol - Desarrolladora
+- Gaytan Herrera Belen - Diseñadora UX/UI
 
 
