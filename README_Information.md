@@ -1,4 +1,4 @@
-# **D1-Architecture & Threat Model**
+# **D1 - Architecture & Threat Model**
 ## **Objetivo**
 Diseñar la Bóveda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
 Este entregable asegura que su equipo:
@@ -161,7 +161,7 @@ Un atacante no debe poder forzar al sistema a “descifrar primero y verificar d
 | Compartición con multiples destinitarios | Cuenta con cifrado híbrido, envolviendo la clave de sesión para cada receptor con su clave pública |
 | Resitencia de ataques por nonce | Un NONCE único por cifrado, prohibiendo la reutilización |
 
-# **D2-Secure Symmetric Encryption Module**
+# **D2 - Secure Symmetric Encryption Module**
 ## **Objetivo**
 Implementar un módulo de cifrado seguro de archivos que garantice:
 - Confidencialidad
@@ -209,7 +209,6 @@ El nonce se almacena junto con el archivo cifrado dentro del contenedor de la b�
 El sistema protege ciertos metadatos utilizando AAD (Additional Authenticated Data).
 
 Ejemplos de metadatos protegidos:
-
 * Nombre del archivo
 * Fecha de creación
 * Identificador del documento
@@ -217,7 +216,6 @@ Ejemplos de metadatos protegidos:
 
 Estos metadatos no se cifran, pero sí se incluyen en el proceso de autenticación.
 Si un atacante intenta modificarlos, el proceso de descifrado fallará.
-
 Esto evita ataques donde se manipula información contextual del archivo almacenado.
 
 ## **5. Detección de manipulación**
@@ -225,13 +223,11 @@ Esto evita ataques donde se manipula información contextual del archivo almacen
 ChaCha20-Poly1305 genera automáticamente una etiqueta de autenticación (authentication tag) mediante el algoritmo Poly1305.
 
 Durante el proceso de descifrado:
-
 1. El sistema verifica la autenticidad del ciphertext y de los metadatos.
 2. Si los datos han sido modificados, el algoritmo produce un error.
 3. El archivo no se descifra.
 
 Esto permite detectar:
-
 * Modificación del ciphertext
 * Alteración de metadatos
 * Corrupción del archivo
@@ -257,3 +253,81 @@ Al utilizar ChaCha20-Poly1035 el reutilizar un nonce con la misma clave comprome
   - Alguien que puede leer el almacenamiento.
   - Alguien que intente forzar descifrando con datos alterados.
   - Alguien que puede mnodificar el contenedor.
+
+# **D3 - Hybrid Encryption**
+## **Objetivo**
+Extender el sistema para soportar el intercambio seguro de archivos entre múltiples usuarios utilizando cifrado híbrido.
+Después de esta entrega, el sistema debe permitir:
+- Un archivo cifrado una sola vez
+- Múltiples destinatarios autorizados
+- Solo esos destinatarios pueden descifrar
+
+## **Objetivo de Seguridad**
+Después de D3:
+Solo los destinatarios previstos pueden acceder al archivo, incluso si el contenedor cifrado se expone públicamente.
+Usarás cifrado híbrido porque NO se cifran archivos directamente con claves públicas.
+En su lugar (como se vio en clase):
+* Generar una clave simétrica aleatoria (clave del archivo).
+* Cifrar el archivo usando AEAD (de D2).
+* Cifrar la clave del archivo usando la clave pública de cada destinatario.
+* Almacenar todas las claves cifradas en el contenedor.
+
+Estructura conceptual
+Archivo → AEAD → texto cifrado
+Clave del archivo → cifrada con la clave pública de Alice
+         → cifrada con la clave pública de Bob
+         → cifrada con la clave pública de Carol
+
+## **1. Cifrado para múltiples destinatarios**
+El sistema soporta múltiples destinatarios autorizados (Alice, Bob y Carol), por lo que cumple con el requisito de operar con al menos dos usuarios. Para proteger un archivo se genera una clave simétrica aleatoria (**file key**) que se usa para cifrar el contenido completo del archivo una sola vez mediante ChaCha20-Poly1305.
+Cunado el archivo este cifrado, la **file key** no se transmite en texto plano; sino que, se cifra de forma independiente para cada destinatario usando su clave mediante **ECIES**. El contenedor final almacena una entrada por destinatario con su identificador y su clave cifrada; de este modo, el archivo se cifra una sola vez y puede ser descifrado por cualquier usuario autorizado.
+
+## **2. Descifrado basado en el destinatario**
+Cuando un usuario abre un archivo compartido, el sistema revisa la sección de destinatario dentro del contenedor para identificar la entrada correspondiente; una vez localizada, toma la llave cifrada asociada a ese usuario y la intenta descifrar con su clave privada. Si la clave privada corresponde a la clave pública utilizada al cifrar esa entrada, el usuario recupera la **file key**; porteriormente, esta se emplea para descifrar el contenido del archivo con ChaCha20-Poly1305 y si el usuario no está autorizado, si la clave privada es incorrecta, o si el contenedor fue modificado, el descifrado falla de forma segura.
+
+## **3. Mecanismo de identificación de claves**
+Para que cada destinatario localice su clave de forma correcta, se define un mecanismo de identificación basado en dos elementos: un identificador explícito de usuario (**id**) que nos indicará a qué usuario pertenece cada entrada y una huella digital de la clave pública (**key_id**) la cual estará asociada a dicha entrada con una clave pública.
+Este mecanismo reduce el riesgo de confusión porque, dado un identificador, siempre se localiza la misma entrada correspondiente. Además, la inclusión de la huella digital de la clave pública dificulta que un intercambio de identidades o una sustitución de claves pase desapercibido.
+
+## **4. Formato actualizado del cotenedor**
+El contenedor seguro incorpora toda la información necesaria para el cifrado compartido, su estructura incluye los metadatos generales del archivo, la lista de destinatarios con sus claves cifradas, el **ciphertext** del archivo y el **tag** de autenticación. Conceptualmente queda así:
+```json
+{
+  "metadata": { ... },
+  "recipients": [
+    { "id": "alice", "key_id": "...", "encrypted_key": "..." },
+    { "id": "bob", "key_id": "...", "encrypted_key": "..." }
+  ],
+  "nonce": "...",
+  "ciphertext": "...",
+  "tag": "..."
+}
+```
+
+## **5. Integración de Metadata + AAD**
+El sistema incorpora información crítica que debe quedar autenticada aunque no esté cifrada directamente al AAD, en nuestro caso el AAD incluye los metadatos, la lista de destinatarios , los identificadores de clave y los identificadores de algoritmos utilizados.
+Esto es importante debido a que protege contra modificaciones no autorizadas del contenedor por parte de quien no posea las claves; por lo que, cualquier intento de agregaro eliminar un destinatario o de intercambiar identidades será detectado por el sistema.
+
+## **6. Uso seguro de claves públicas**
+En nuestro diseño se hace un uso adecuado de las claves públicas, ya que estas no se emplean para cifrar archivos completos debido a que eso sería ineficiente y no correspondería al modelo de cifrado híbrido, Debido a eso, se usan para cifrar un dato de tamaño reducido que es la **file key** (llave simétrica con la que se protege un archivo).
+Para ello se eligió un esquema de estilo **ECIES** que nos permite cifrar de forma segura la clave simétrica para cada destinatario.
+
+## **7. Explicación del diseño híbrido**
+- ¿Por qué se usa cifrado híbrido?
+Porque combina la eficiencia para proteger archivos completos que nos la brinda el cifrado simétrico junto con la permisiva de distribuir la clave de forma segura entre varios destinatarios sin transmitirla en texto plano que brinda el cifrado asimétrico.
+
+- ¿Por qué sigue siendo necesario el cifrado simétrico?
+Sigue siendo necesario porque Chacha20-Poly 1305 es el más adecuado para cifrar grandes volúmenes de datos y proporciona confidencialidad e integridad en una sola operación.
+
+- ¿Por qué se requiere cifrado de clave por destinatario?
+El cifrado de clave por destinatario es necesario porque cada usuario tiene su propia clave pública, así cada usuario autorizado puede recuperar la clave del archivo usando su clave privada, mientras que uno no autorizado no podrá hacerlo.
+
+## **8. Decisiones de seguridad**
+* ¿Cómo identifican los destinatarios su clave
+Los destinatarios identifican su clave buscando su entrada dentro de la lista **recipients**, usando el **id** del usuario y validando el **key_id** asociado a su clave pública, con esto se reducen posibles errores o confusiones al seleccionar una clave cifrada.
+
+* ¿Qué pasa si un atacante modifica la lista de destinatarios?
+En caso de que un atacante modifique la lista de destinatarios, el sistema detecta la alteración debido a que esa información forma parte del AAD; debido a ello, al intentar abrir el archivo, la verificación de autenticidad falla y el descifrado no se completa, lo que protege contra la adición, eliminación o sustitución no autorizada de destinatarios.
+
+* ¿Qué pasa si la clave pública es incorrecta?
+Si la clave pública usada para cifrar es incorrecta, el destinatario real no podrá recuperar la **file key** con su clave privada; ya que, el cifrado de la clave falla y el archivo no puede abrirse, por lo que el sistema falla de manerasegura sin exponer el contenido.
