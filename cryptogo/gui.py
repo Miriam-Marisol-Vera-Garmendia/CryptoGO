@@ -1,153 +1,297 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, scrolledtext
+from datetime import datetime
 from pathlib import Path
-import re
 
-from encryption.file_vault import encrypt_file, decrypt_file
+from ecies.utils import generate_key
+
+from encryption.hybrid_vault import (
+    encrypt_file_for_recipients,
+    decrypt_file_for_recipient,
+)
+from encryption import HybridVaultAuthenticationError, HybridVaultFormatError
 
 selected_file = None
-generated_key = None
 
 
-def clean_hex(text):
-    """Eliminar todo lo que no sea hexadecimal"""
-    return re.sub(r'[^0-9a-fA-F]', '', text)
+# ─────────────────────────── Helpers ────────────────────────────────────────
+
+def copy_to_clipboard(text: str):
+    root.clipboard_clear()
+    root.clipboard_append(text)
+    root.update()
 
 
-def paste_clean(event):
-    """Intercepta CTRL+V y limpia la clave pegada"""
-    try:
-        text = root.clipboard_get()
-        text = clean_hex(text)
+def get_recipients() -> dict[str, str]:
+    """Lee los campos de recipients y devuelve {nombre: pubkey_hex}."""
+    recipients = {}
+    for name_entry, key_entry in recipient_rows:
+        name = name_entry.get().strip()
+        key = key_entry.get().strip()
+        if name and key:
+            recipients[name] = key
+    return recipients
 
-        entry_key.delete(0, tk.END)
-        entry_key.insert(0, text)
 
-    except:
-        pass
+# ─────────────────────────── Generar par de claves ──────────────────────────
 
-    return "break"
+def generate_keypair():
+    sk = generate_key()
+    private_hex = sk.secret.hex()
+    public_hex = sk.public_key.format(compressed=False).hex()
 
+    win = tk.Toplevel(root)
+    win.title("Par de claves generado")
+    win.geometry("620x280")
+    win.resizable(False, False)
+
+    tk.Label(win, text="🔑 Clave Pública (comparte con quienes cifren para ti):",
+             font=("Consolas", 9, "bold")).pack(anchor="w", padx=10, pady=(10, 0))
+    pub_box = tk.Entry(win, width=88)
+    pub_box.insert(0, public_hex)
+    pub_box.config(state="readonly")
+    pub_box.pack(padx=10)
+
+    tk.Label(win, text="🔒 Clave Privada (guárdala en secreto, NO la compartas):",
+             font=("Consolas", 9, "bold"), fg="red").pack(anchor="w", padx=10, pady=(10, 0))
+    priv_box = tk.Entry(win, width=88, show="*")
+    priv_box.insert(0, private_hex)
+    priv_box.config(state="readonly")
+    priv_box.pack(padx=10)
+
+    def reveal():
+        priv_box.config(show="" if priv_box.cget("show") == "*" else "*")
+
+    def copy_priv():
+        copy_to_clipboard(private_hex)
+        messagebox.showinfo("Copiado", "Clave privada copiada al portapapeles.", parent=win)
+
+    def copy_pub():
+        copy_to_clipboard(public_hex)
+        messagebox.showinfo("Copiado", "Clave pública copiada al portapapeles.", parent=win)
+
+    btn_frame = tk.Frame(win)
+    btn_frame.pack(pady=10)
+    tk.Button(btn_frame, text="Mostrar/Ocultar privada", command=reveal).pack(side="left", padx=5)
+    tk.Button(btn_frame, text="Copiar privada", command=copy_priv).pack(side="left", padx=5)
+    tk.Button(btn_frame, text="Copiar pública", command=copy_pub).pack(side="left", padx=5)
+
+
+# ─────────────────────────── Seleccionar archivo ────────────────────────────
 
 def select_file():
     global selected_file
-    selected_file = filedialog.askopenfilename()
-
+    selected_file = filedialog.askopenfilename(title="Seleccionar archivo a cifrar")
     if selected_file:
-        label_file.config(text=f"Archivo: {selected_file}")
+        label_file.config(text=f"Archivo: {Path(selected_file).name}")
 
+
+# ─────────────────────────── Cifrar ─────────────────────────────────────────
 
 def encrypt():
-    global generated_key
-
     if not selected_file:
-        messagebox.showerror("Error", "Selecciona un archivo primero")
+        messagebox.showerror("Error", "Selecciona un archivo primero.")
         return
 
-    output_dir = filedialog.askdirectory(title="Seleccionar carpeta para contenedor")
+    recipients = get_recipients()
 
+    if len(recipients) < 2:
+        messagebox.showerror(
+            "Error",
+            "Debes agregar al menos 2 recipients con nombre y clave pública."
+        )
+        return
+
+    output_dir = filedialog.askdirectory(title="Seleccionar carpeta de destino para el contenedor")
     if not output_dir:
         return
 
-    container_path = Path(output_dir) / "vault_container"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_stem = Path(selected_file).stem
+    container_name = f"{file_stem}_{timestamp}"
+    container_path = Path(output_dir) / container_name
 
     try:
-        generated_key = encrypt_file(selected_file, container_path)
-
-        key_hex = generated_key.hex()
-
-        # copiar al portapapeles
-        root.clipboard_clear()
-        root.clipboard_append(key_hex)
-        root.update()
-
+        result_path = encrypt_file_for_recipients(selected_file, container_path, recipients)
         messagebox.showinfo(
             "Éxito",
-            f"Archivo cifrado correctamente.\n\n"
-            f"La clave se copió al portapapeles.\n\n"
-            f"Guárdala en un lugar seguro."
+            f"Archivo cifrado correctamente.\n\nContenedor creado en:\n{result_path}\n\n"
+            f"Recipients incluidos: {', '.join(recipients.keys())}"
         )
-
+    except FileExistsError:
+        messagebox.showerror("Error", "Ya existe un contenedor 'vault_container' en esa carpeta. "
+                             "Elige otra carpeta o renombra el existente.")
+    except ValueError as e:
+        messagebox.showerror("Error de configuración", str(e))
     except Exception as e:
-        messagebox.showerror("Error", str(e))
+        messagebox.showerror("Error inesperado", str(e))
 
+
+# ─────────────────────────── Descifrar ──────────────────────────────────────
 
 def decrypt():
-    container_dir = filedialog.askdirectory(title="Seleccionar contenedor")
-
+    container_dir = filedialog.askdirectory(
+        title="Seleccionar carpeta del contenedor (vault_container o su carpeta padre)"
+    )
     if not container_dir:
         return
 
-    key_hex = entry_key.get()
+    container_path = Path(container_dir)
 
-    if not key_hex:
-        messagebox.showerror("Error", "Introduce la clave")
-        return
-
-    try:
-        # limpiar clave
-        key_hex = clean_hex(key_hex)
-
-        print("Clave limpia:", key_hex)
-        print("Longitud:", len(key_hex))
-
-        if len(key_hex) != 64:
+    # Auto-detectar subcarpeta contenedora si el usuario seleccionó la carpeta padre
+    if not (container_path / "header").exists():
+        # Buscar cualquier subcarpeta que contenga un archivo 'header'
+        candidates = [p for p in container_path.iterdir() if p.is_dir() and (p / "header").exists()]
+        if len(candidates) == 1:
+            container_path = candidates[0]
+        elif len(candidates) > 1:
+            names = "\n".join(f"  • {p.name}" for p in candidates)
             messagebox.showerror(
-                "Error",
-                f"La clave debe tener 64 caracteres hex.\nActualmente tiene {len(key_hex)}"
+                "Error de formato",
+                f"Se encontraron varios contenedores en la carpeta.\nSelecciona directamente uno de ellos:\n{names}"
+            )
+            return
+        else:
+            messagebox.showerror(
+                "Error de formato",
+                f"La carpeta seleccionada no contiene un contenedor válido.\n\n"
+                f"Selecciona la carpeta del contenedor (la que tiene archivos 'header', 'ciphertext', etc.).\n\n"
+                f"Ruta: {container_dir}"
             )
             return
 
-        file_key = bytes.fromhex(key_hex)
+    container_dir = str(container_path)
 
-        output_file = filedialog.asksaveasfilename(
-            title="Guardar archivo descifrado",
-            defaultextension=".bin"
+    priv_key = entry_privkey.get().strip()
+    pub_key = entry_pubkey.get().strip()
+
+    if not priv_key:
+        messagebox.showerror("Error", "Introduce tu clave privada.")
+        return
+    if not pub_key:
+        messagebox.showerror("Error", "Introduce tu clave pública.")
+        return
+
+    output_file = filedialog.asksaveasfilename(
+        title="Guardar archivo descifrado",
+        defaultextension=".bin"
+    )
+    if not output_file:
+        return
+
+    try:
+        result = decrypt_file_for_recipient(
+            container_dir=container_dir,
+            recipient_private_key_hex=priv_key,
+            recipient_public_key_hex=pub_key,
+            output_path=output_file,
         )
+        messagebox.showinfo("Éxito", f"Archivo descifrado correctamente.\n\nGuardado en:\n{result}")
 
-        if not output_file:
-            return
-
-        decrypt_file(container_dir, file_key, output_file)
-
-        messagebox.showinfo("Éxito", "Archivo descifrado correctamente")
-
-    except ValueError:
+    except HybridVaultAuthenticationError:
         messagebox.showerror(
-            "Error de clave",
-            "La clave no es hexadecimal válida."
+            "Error de autenticación",
+            "Las claves no son válidas para este contenedor, o el contenedor fue alterado."
         )
-
+    except HybridVaultFormatError as e:
+        messagebox.showerror("Error de formato", f"El contenedor está dañado o es inválido:\n{e}")
     except Exception as e:
-        messagebox.showerror("Error", str(e))
+        messagebox.showerror("Error inesperado", str(e))
 
 
-# ventana
+# ─────────────────────────── Agregar recipient ──────────────────────────────
+
+recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
+
+
+def add_recipient_row(name_default="", key_default=""):
+    frame = tk.Frame(recipients_frame, bd=1, relief="groove")
+    frame.pack(fill="x", padx=5, pady=2)
+
+    tk.Label(frame, text="Nombre:", width=8, anchor="e").pack(side="left")
+    name_entry = tk.Entry(frame, width=14)
+    name_entry.insert(0, name_default)
+    name_entry.pack(side="left", padx=(0, 5))
+
+    tk.Label(frame, text="Clave pública:", width=12, anchor="e").pack(side="left")
+    key_entry = tk.Entry(frame, width=45)
+    key_entry.insert(0, key_default)
+    key_entry.pack(side="left", padx=(0, 5))
+
+    def remove():
+        recipient_rows.remove((name_entry, key_entry))
+        frame.destroy()
+
+    tk.Button(frame, text="✕", command=remove, fg="red", width=2).pack(side="left")
+    recipient_rows.append((name_entry, key_entry))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Ventana principal
+# ════════════════════════════════════════════════════════════════════════════
+
 root = tk.Tk()
-root.title("CryptoGO Secure Vault")
-root.geometry("500x350")
+root.title("CryptoGO Secure Vault  —  Hybrid ECIES")
+root.geometry("700x580")
+root.resizable(False, False)
 
-title = tk.Label(root, text="CryptoGO Secure Vault", font=("Arial", 16))
-title.pack(pady=10)
+# Título
+tk.Label(root, text="CryptoGO Secure Vault", font=("Arial", 17, "bold")).pack(pady=(12, 0))
+tk.Label(root, text="Cifrado híbrido ECIES + ChaCha20-Poly1305",
+         font=("Arial", 9), fg="gray").pack(pady=(0, 8))
 
-btn_select = tk.Button(root, text="Seleccionar archivo", command=select_file)
-btn_select.pack(pady=5)
+# ── Generar claves ──────────────────────────────────────────────────────────
+frame_keygen = tk.LabelFrame(root, text="Utilidades de claves", padx=8, pady=6)
+frame_keygen.pack(fill="x", padx=12, pady=4)
+tk.Button(frame_keygen, text="Generar par de claves ECIES", command=generate_keypair,
+          bg="#2a7ae2", fg="white", font=("Arial", 9, "bold"), padx=8).pack(side="left")
+tk.Label(frame_keygen, text="  Genera un nuevo par público/privado para un recipient",
+         fg="gray", font=("Arial", 8)).pack(side="left")
 
-label_file = tk.Label(root, text="Ningún archivo seleccionado")
-label_file.pack(pady=5)
+# ── Cifrar ──────────────────────────────────────────────────────────────────
+frame_enc = tk.LabelFrame(root, text="Cifrar archivo", padx=8, pady=6)
+frame_enc.pack(fill="x", padx=12, pady=4)
 
-btn_encrypt = tk.Button(root, text="Cifrar archivo", command=encrypt)
-btn_encrypt.pack(pady=10)
+row_file = tk.Frame(frame_enc)
+row_file.pack(fill="x", pady=2)
+tk.Button(row_file, text="Seleccionar archivo", command=select_file).pack(side="left")
+label_file = tk.Label(row_file, text="Ningún archivo seleccionado", fg="gray")
+label_file.pack(side="left", padx=10)
 
-tk.Label(root, text="Clave para descifrar:").pack()
+# Recipients
+tk.Label(frame_enc, text="Recipients (mínimo 2):", anchor="w",
+         font=("Arial", 9, "bold")).pack(fill="x", pady=(6, 0))
 
-entry_key = tk.Entry(root, width=60)
-entry_key.pack(pady=5)
+recipients_frame = tk.Frame(frame_enc)
+recipients_frame.pack(fill="x")
 
-# interceptar CTRL+V
-entry_key.bind("<Control-v>", paste_clean)
+# Dos filas por defecto
+add_recipient_row("Recipient 1")
+add_recipient_row("Recipient 2")
 
-btn_decrypt = tk.Button(root, text="Descifrar contenedor", command=decrypt)
-btn_decrypt.pack(pady=10)
+btn_row = tk.Frame(frame_enc)
+btn_row.pack(pady=4)
+tk.Button(btn_row, text="+ Agregar recipient", command=add_recipient_row).pack(side="left", padx=4)
+tk.Button(btn_row, text="Cifrar →", command=encrypt,
+          bg="#27ae60", fg="white", font=("Arial", 9, "bold"), padx=8).pack(side="left", padx=4)
+
+# ── Descifrar ───────────────────────────────────────────────────────────────
+frame_dec = tk.LabelFrame(root, text="Descifrar contenedor", padx=8, pady=6)
+frame_dec.pack(fill="x", padx=12, pady=4)
+
+row_priv = tk.Frame(frame_dec)
+row_priv.pack(fill="x", pady=2)
+tk.Label(row_priv, text="Clave privada:", width=14, anchor="e").pack(side="left")
+entry_privkey = tk.Entry(row_priv, width=68, show="*")
+entry_privkey.pack(side="left")
+
+row_pub = tk.Frame(frame_dec)
+row_pub.pack(fill="x", pady=2)
+tk.Label(row_pub, text="Clave pública:", width=14, anchor="e").pack(side="left")
+entry_pubkey = tk.Entry(row_pub, width=68)
+entry_pubkey.pack(side="left")
+
+tk.Button(frame_dec, text="Descifrar →", command=decrypt,
+          bg="#e67e22", fg="white", font=("Arial", 9, "bold"), padx=8).pack(pady=6)
 
 root.mainloop()
