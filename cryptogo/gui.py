@@ -202,6 +202,18 @@ def decrypt():
 # ─────────────────────────── Agregar recipient ──────────────────────────────
 
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
+# Mapa entry -> botón ✕ para poder habilitarlo/deshabilitarlo
+_remove_buttons: dict = {}
+
+
+def _update_remove_buttons():
+    """Deshabilita los botones ✕ cuando solo quedan 2 recipients (mínimo requerido)."""
+    can_remove = len(recipient_rows) > 2
+    for key, btn in _remove_buttons.items():
+        try:
+            btn.config(state="normal" if can_remove else "disabled")
+        except tk.TclError:
+            pass  # el widget ya fue destruido
 
 
 def add_recipient_row(name_default="", key_default=""):
@@ -218,12 +230,30 @@ def add_recipient_row(name_default="", key_default=""):
     key_entry.insert(0, key_default)
     key_entry.pack(side="left", padx=(0, 5))
 
-    def remove():
-        recipient_rows.remove((name_entry, key_entry))
-        frame.destroy()
+    remove_btn = tk.Button(frame, text="✕", fg="red", width=2)
+    remove_btn.pack(side="left")
+    _remove_buttons[id(name_entry)] = remove_btn
 
-    tk.Button(frame, text="✕", command=remove, fg="red", width=2).pack(side="left")
+    def remove():
+        confirmed = messagebox.askyesno(
+            "Eliminar recipient",
+            "⚠️ Atención:\n\n"
+            "Eliminar este recipient de la lista solo afecta los FUTUROS cifrados.\n\n"
+            "Los archivos ya cifrados que incluían a este recipient seguirán siendo "
+            "accesibles para él, ya que su clave está guardada dentro del vault.\n\n"
+            "Para revocar el acceso, debes re-cifrar el archivo sin este recipient.\n\n"
+            "¿Deseas eliminarlo de la lista de todos modos?"
+        )
+        if not confirmed:
+            return
+        recipient_rows.remove((name_entry, key_entry))
+        _remove_buttons.pop(id(name_entry), None)
+        frame.destroy()
+        _update_remove_buttons()
+
+    remove_btn.config(command=remove)
     recipient_rows.append((name_entry, key_entry))
+    _update_remove_buttons()
 
 
 # ════════════════════════════════════════════════════════════════════════════
