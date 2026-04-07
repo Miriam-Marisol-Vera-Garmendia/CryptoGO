@@ -95,10 +95,10 @@ def encrypt():
 
     recipients = get_recipients()
 
-    if len(recipients) < 2:
+    if len(recipients) < 1:
         messagebox.showerror(
             "Error",
-            "Debes agregar al menos 2 recipients con nombre y clave pública."
+            "Debes agregar al menos 1 recipient con nombre y clave pública."
         )
         return
 
@@ -207,8 +207,8 @@ _remove_buttons: dict = {}
 
 
 def _update_remove_buttons():
-    """Deshabilita los botones ✕ cuando solo quedan 2 recipients (mínimo requerido)."""
-    can_remove = len(recipient_rows) > 2
+    """Deshabilita los botones ✕ cuando solo queda 1 recipient (mínimo requerido)."""
+    can_remove = len(recipient_rows) > 1
     for key, btn in _remove_buttons.items():
         try:
             btn.config(state="normal" if can_remove else "disabled")
@@ -289,15 +289,14 @@ label_file = tk.Label(row_file, text="Ningún archivo seleccionado", fg="gray")
 label_file.pack(side="left", padx=10)
 
 # Recipients
-tk.Label(frame_enc, text="Recipients (mínimo 2):", anchor="w",
+tk.Label(frame_enc, text="Recipients (mínimo 1):", anchor="w",
          font=("Arial", 9, "bold")).pack(fill="x", pady=(6, 0))
 
 recipients_frame = tk.Frame(frame_enc)
 recipients_frame.pack(fill="x")
 
-# Dos filas por defecto
+# Una fila por defecto (se pueden agregar más con el botón)
 add_recipient_row("Recipient 1")
-add_recipient_row("Recipient 2")
 
 btn_row = tk.Frame(frame_enc)
 btn_row.pack(pady=4)
