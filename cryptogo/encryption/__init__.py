@@ -13,11 +13,18 @@ from .hybrid_vault import (
     HybridVaultAuthenticationError,
     HybridVaultError,
     HybridVaultFormatError,
+    HybridVaultSignatureError,
     decrypt_file_for_recipient,
     encrypt_file_for_recipients,
+    generate_ecies_keypair,
+    generate_signing_keypair,
+    get_container_info,
+    protect_private_key,
+    recover_private_key,
 )
 
 __all__ = [
+    # file_vault
     "VaultAuthenticationError",
     "VaultError",
     "VaultFormatError",
@@ -26,9 +33,16 @@ __all__ = [
     "encrypt_bytes",
     "encrypt_file",
     "generate_file_key",
+    # hybrid_vault
     "HybridVaultAuthenticationError",
     "HybridVaultError",
     "HybridVaultFormatError",
+    "HybridVaultSignatureError",
     "decrypt_file_for_recipient",
     "encrypt_file_for_recipients",
+    "generate_ecies_keypair",
+    "generate_signing_keypair",
+    "get_container_info",
+    "protect_private_key",
+    "recover_private_key",
 ]
