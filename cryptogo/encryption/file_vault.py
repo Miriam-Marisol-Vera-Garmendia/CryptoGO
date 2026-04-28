@@ -10,7 +10,6 @@ from typing import Optional
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-
 MAGIC = "CRYPTOGO_VAULT"
 CONTAINER_VERSION = 1
 AEAD_ALGORITHM = "ChaCha20-Poly1305"
@@ -18,18 +17,14 @@ KEY_SIZE_BYTES = 32
 NONCE_SIZE_BYTES = 12
 TAG_SIZE_BYTES = 16
 
-
 class VaultError(Exception):
     """Base exception for vault errors."""
-
 
 class VaultAuthenticationError(VaultError):
     """Raised when AEAD authentication fails."""
 
-
 class VaultFormatError(VaultError):
     """Raised when the encrypted container format is invalid."""
-
 
 @dataclass(frozen=True)
 class VaultHeader:
@@ -56,7 +51,6 @@ class VaultHeader:
             "plaintext_size": self.plaintext_size,
         }
 
-
 def _canonical_json(data: dict) -> bytes:
     """
     Serialize metadata deterministically so it can be used as AAD.
@@ -68,17 +62,14 @@ def _canonical_json(data: dict) -> bytes:
         separators=(",", ":"),
     ).encode("utf-8")
 
-
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
 
 def generate_file_key() -> bytes:
     """
     Generates a fresh 256-bit key for one file.
     """
     return ChaCha20Poly1305.generate_key()
-
 
 def _build_header(
     original_filename: Optional[str],
@@ -96,7 +87,6 @@ def _build_header(
         plaintext_size=plaintext_size,
     )
 
-
 def _write_container(
     container_dir: Path,
     header_bytes: bytes,
@@ -110,7 +100,6 @@ def _write_container(
     (container_dir / "nonce").write_bytes(nonce)
     (container_dir / "ciphertext").write_bytes(ciphertext)
     (container_dir / "authentication_tag").write_bytes(tag)
-
 
 def _read_container(container_dir: Path) -> tuple[bytes, bytes, bytes, bytes]:
     if not container_dir.exists() or not container_dir.is_dir():
@@ -131,7 +120,6 @@ def _read_container(container_dir: Path) -> tuple[bytes, bytes, bytes, bytes]:
         raise VaultFormatError("Authentication tag inválido: tamaño incorrecto.")
 
     return header_bytes, nonce, ciphertext, tag
-
 
 def _validate_header(header_bytes: bytes) -> dict:
     try:
@@ -178,7 +166,6 @@ def _validate_header(header_bytes: bytes) -> dict:
 
     return header
 
-
 def encrypt_bytes(
     plaintext: bytes,
     original_filename: Optional[str] = None,
@@ -206,7 +193,6 @@ def encrypt_bytes(
     tag = combined[-TAG_SIZE_BYTES:]
 
     return file_key, header_bytes, nonce, ciphertext, tag
-
 
 def decrypt_bytes(
     file_key: bytes,
@@ -247,7 +233,6 @@ def decrypt_bytes(
 
     return plaintext
 
-
 def encrypt_file(input_path: str | Path, output_dir: str | Path) -> bytes:
     """
     Encrypts a file into a directory container:
@@ -281,7 +266,6 @@ def encrypt_file(input_path: str | Path, output_dir: str | Path) -> bytes:
     )
 
     return file_key
-
 
 def decrypt_file(
     container_dir: str | Path,
