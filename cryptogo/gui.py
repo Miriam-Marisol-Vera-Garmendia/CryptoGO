@@ -705,41 +705,18 @@ def decrypt():
             f"Tamaño       : {info['plaintext_size']:,} bytes",
         )
 
-    except HybridVaultSignatureError as e:
-        # La firma es inválida → el archivo NO se descifra
-        set_status("⚠️ FIRMA INVÁLIDA — descifrado rechazado.", DANGER)
-        messagebox.showerror(
-            "⚠️ ALERTA DE SEGURIDAD — Firma digital inválida",
-            "La firma Ed25519 del contenedor NO es válida.\n\n"
-            "Esto puede significar:\n"
-            "  • El contenedor fue modificado después de ser firmado.\n"
-            "  • La clave pública del firmante no corresponde al firmante real.\n"
-            "  • Un atacante alteró el ciphertext, los metadatos o los recipients.\n\n"
-            f"Detalle técnico:\n{e}\n\n"
-            "⛔ El archivo NO fue descifrado.",
-        )
+except (HybridVaultSignatureError, HybridVaultAuthenticationError, HybridVaultFormatError) as e:
+    # No revelar si falló la firma, la clave, AEAD o el formato.
+    # Los detalles se guardan únicamente en logs locales de seguridad.
+    log_security_error("decrypt_container", e)
+    set_status("No se pudo procesar el contenedor.", DANGER)
+    messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
 
-    except HybridVaultAuthenticationError:
-        set_status("⚠️ Autenticación AEAD fallida — contenedor alterado o clave incorrecta.", DANGER)
-        messagebox.showerror(
-            "⚠️ ALERTA DE SEGURIDAD — Autenticación fallida",
-            "Las claves ECIES no son válidas para este contenedor,\n"
-            "o el contenedor fue modificado después de ser cifrado.\n\n"
-            "Posibles causas:\n"
-            "  • Clave privada o pública ECIES incorrecta.\n"
-            "  • Header, recipients, ciphertext o tag alterados.\n\n"
-            "⛔ El archivo NO fue descifrado.",
-        )
-
-    except HybridVaultFormatError as e:
-        set_status("Error de formato en el contenedor.", DANGER)
-        messagebox.showerror("Error de formato",
-                             f"El contenedor está dañado o es inválido:\n\n{e}")
-
-    except Exception as e:
-        set_status("Error inesperado.", DANGER)
-        messagebox.showerror("Error inesperado", str(e))
-
+except Exception as e:
+    # También evitar filtrar rutas, trazas o mensajes internos en errores inesperados.
+    log_security_error("decrypt_unexpected", e)
+    set_status("No se pudo procesar el contenedor.", DANGER)
+    messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Ventana principal  (con scroll para adaptarse a cualquier resolución)
