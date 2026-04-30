@@ -331,3 +331,90 @@ En caso de que un atacante modifique la lista de destinatarios, el sistema detec
 
 * ¿Qué pasa si la clave pública es incorrecta?
 Si la clave pública usada para cifrar es incorrecta, el destinatario real no podrá recuperar la **file key** con su clave privada; ya que, el cifrado de la clave falla y el archivo no puede abrirse, por lo que el sistema falla de manerasegura sin exponer el contenido.
+
+# **D5 - Firmas Digitales y Autenticación**
+
+## **1. Diseño de Firma**
+
+### **1.1 Algoritmo elegido**
+
+- **Algoritmo utilizado**:
+Para implementar las firmas digitales se eligió **Ed25519**, ya que es un algoritmo moderno, rápido y seguro el cual se utiliza principalmente para comprobar quién creó el archivo y asegurarse de que no ha sido modificado después de ser firmado
+
+- **Razón de elección**:
+La principal razón para usar este algoritmo es que ofrece una seguridad muy alta con claves y firmas muy pequeñas a diferencia de otros algoritmos más antiguos como RSA, y que al generar firmas compactas no agrega mucho peso al contenedor. Además, es determinista lo que significa que si se firma el mismo contenido dos veces se obtiene exactamente la misma firma lo que facilita su verificación.
+Cabe mencionar que cada firma incluye `signer_id` que se genera a partir de la clave pública del usuario lo cual permite que el receptor pueda saber exactamente quién firmó el archivo y verificar la firma correctamente.
+
+### **1.2 ¿Qué datos se firman?**
+
+La firma se aplica a varias partes importantes del contenedor entre las cuales se encuentran:
+
+- Los **metadatos** que es la información como nombre del archivo, fecha, versión, etc
+- La **lista de destinatarios** es la lista de usuarios que pueden acceder al archivo
+- El **nonce** es el valor usado en el cifrado
+- El **ciphertext** que es básicamente el archivo cifrado
+- La **tag** el cual es el control de autenticación del archivo
+
+Esto es importante porque evita que alguien pueda modificar alguna parte del contenedor sin ser detectado; por ejemplo un atacante no podría cambiar el nombre del archivo, alterar la lista de destinatarios o modificar el contenido sin que la firma deje de ser válida y de esta manera se garantiza la integridad del archivo.
+
+### **1.3 ¿Por qué se requiere hashing antes de firmar?**
+
+En este sistema no se calcula un hash por separado antes de firmar, ya que al estar usando el algoritmo Ed25519, este incluye internamente el uso de hashing como parte de su funcionamiento lo que significa que, aunque en el código no se vea un paso explícito de “primero hacer hash y luego firmar”, en realidad ese proceso sí ocurre dentro del algoritmo. Es decir, Ed25519 toma los datos que se quieren proteger y aplica internamente las operaciones necesarias para generar una firma segura.
+
+El hashing permite detectar cualquier cambio en los datos ya que si alguien modifica aunque sea un solo byte del contenedor ya sea el archivo cifrado, los metadatos o la lista de destinatarios, la firma dejará de ser válida y el sistema lo rechazará automáticamente.
+
+Gracias a esto, el sistema puede asegurar dos cosas importantes: 
+- Que el contenido no fue alterado 
+- Que realmente proviene del usuario que lo firmó. 
+Por eso, antes de descifrar el archivo, primero se verifica la firma, y si algo no coincide, el archivo se rechaza automáticamente.
+
+### **1.4 ¿Cómo se ve el flujo completo?**
+
+- **Al crear un archivo**
+  - Primero se cifra el contenido 
+  - Luego se agregan los metadatos y la lista de destinatarios 
+  - Y al final se firma todo junto antes de guardar el contenedor
+  - Nada se firma antes de estar completo
+
+- **Al abrir un archivo**
+  - Primero se lee el contenedor 
+  - Se identifica al firmante 
+  - Se verifica la firma 
+  - Y solo si todo está correcto se procede a descifrar
+  - Si la firma no es válida, el archivo se rechaza sin importar nada más
+
+Esta verificación es lo que garantiza que el archivo realmente viene de quien dice ser, y que nadie lo modificó en el camino
+
+## **2. Decisiones de Seguridad**
+
+### **2.1 ¿Por qué firmar el texto cifrado y no el texto plano?**
+
+- **El texto cifrado es lo que realmente se almacena y transmite**: El sistema firma los datos que viajan y se almacenan dentro del contenedor, no el contenido original que solo existe temporalmente antes del cifrado.
+
+- **El receptor verifica la firma ANTES de descifrar**: La firma se verifica antes de cualquier operación de descifrado, en ese momento el receptor todavía no tiene acceso al texto plano.
+
+- **Firmar el texto cifrado garantiza integridad del contenido cifrado**: La verificación de la firma fallará y el archivo será rechazado si un atacante modifica el texto cifrado después de que fue firmado.
+
+- **Consistencia con el modelo de seguridad**: La firma protege el contenedor final con los metadatos, destinatarios y el contenido cifrado para asegurar que no hayan sido alterados desde que fueron firmados.
+
+### **2.2 ¿Qué pasa si la firma no se verifica primero?**
+
+- **Sin autenticidad del origen**: No habría forma de confirmar quién creó realmente el archivo, cualquier persona podría generar o modificar un contenedor y tratar de hacerlo pasar como legítimo.
+
+- **Ataque de suplantación**: Un atacante podría tomar un contenedor existente, alterarlo y reclamar que fue creado por otro usuario.
+
+- **Error confuso**: El sistema podría intentar descifrar primero y fallar después con un error de autenticación del cifrado en lugar de rechazar directamente el archivo por tener una firma inválida.
+
+- **La verificación es obligatoria**: La firma debe verificarse **antes** de cualquier descifrado. Si la firma es inválida, no está presente o se verifica con una clave pública incorrecta, el contenedor se rechaza y el descifrado **nunca** se ejecuta.
+
+### **2.3 ¿Qué pasa si se excluyen los metadatos?**
+
+- **Manipulación del nombre de archivo**: Un atacante podría cambiar el nombre original del archivo para hacerlo parecer otro tipo de documento o para ocultar su verdadero contenido.
+
+- **Manipulación de destinatarios**: Un atacante podría alterar la información de los usuarios autorizados provocando confusión sobre quién puede acceder al archivo.
+
+- **Suplantación del firmante**: Un atacante podría cambiar la información relacionada con el autor del archivo para hacer creer que el contenedor fue creado por otra persona.
+
+- **La firma debe cubrir todo el contexto del contenedor**: No basta con firmar solo el texto cifrado, también deben protegerse los metadatos, la lista de destinatarios, el nonce, el texto cifrado y la etiqueta de autenticación.
+
+- **Ataques de contexto bloqueados**: Un atacante podría modificar información importante sin tocar directamente el texto cifrado si los metadatos no se incluyen en la firma; cualquier cambio no autorizado provoca que la verificación falle y el contenedor sea rechazado antes de descifrarlo.
