@@ -18,6 +18,38 @@ from encryption import (
     HybridVaultFormatError,
     HybridVaultSignatureError,
 )
+import logging
+import traceback
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Seguridad: mensaje genérico y logger local (sin exponer detalles al usuario)
+# ──────────────────────────────────────────────────────────────────────────────
+
+GENERIC_CONTAINER_ERROR = (
+    "No fue posible procesar el contenedor.\n\n"
+    "Verifica que las claves sean correctas y que el contenedor no haya sido modificado."
+)
+
+_security_logger = logging.getLogger("cryptogo.security")
+if not _security_logger.handlers:
+    _log_path = Path(__file__).parent / "security.log"
+    _handler  = logging.FileHandler(_log_path, encoding="utf-8")
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s  %(levelname)s  %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"
+    ))
+    _security_logger.addHandler(_handler)
+    _security_logger.setLevel(logging.WARNING)
+
+
+def log_security_error(context: str, exc: BaseException) -> None:
+    """Registra el error completo sólo en el log local; nunca lo muestra al usuario."""
+    _security_logger.warning(
+        "[%s] %s: %s\n%s",
+        context,
+        type(exc).__name__,
+        exc,
+        traceback.format_exc(),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -705,18 +737,19 @@ def decrypt():
             f"Tamaño       : {info['plaintext_size']:,} bytes",
         )
 
-except (HybridVaultSignatureError, HybridVaultAuthenticationError, HybridVaultFormatError) as e:
-    # No revelar si falló la firma, la clave, AEAD o el formato.
-    # Los detalles se guardan únicamente en logs locales de seguridad.
-    log_security_error("decrypt_container", e)
-    set_status("No se pudo procesar el contenedor.", DANGER)
-    messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
+    except (HybridVaultSignatureError, HybridVaultAuthenticationError, HybridVaultFormatError) as e:
+        # No revelar si falló la firma, la clave, AEAD o el formato.
+        # Los detalles se guardan únicamente en logs locales de seguridad.
+        log_security_error("decrypt_container", e)
+        set_status("No se pudo procesar el contenedor.", DANGER)
+        messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
 
-except Exception as e:
-    # También evitar filtrar rutas, trazas o mensajes internos en errores inesperados.
-    log_security_error("decrypt_unexpected", e)
-    set_status("No se pudo procesar el contenedor.", DANGER)
-    messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
+    except Exception as e:
+        # También evitar filtrar rutas, trazas o mensajes internos en errores inesperados.
+        log_security_error("decrypt_unexpected", e)
+        set_status("No se pudo procesar el contenedor.", DANGER)
+        messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Ventana principal  (con scroll para adaptarse a cualquier resolución)
