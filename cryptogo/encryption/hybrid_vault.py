@@ -35,6 +35,10 @@ NONCE_SIZE_BYTES         = 12
 TAG_SIZE_BYTES           = 16
 ED25519_SIG_BYTES        = 64         # firma Ed25519 siempre tiene exactamente 64 bytes
 ED25519_PUB_BYTES        = 32         # clave pública Ed25519: 32 bytes
+ALLOWED_FILE_EXTENSIONS  = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps"}
+
+GENERIC_FORMAT_ERROR = "El contenedor o los datos de entrada no son válidos."
+GENERIC_AUTH_ERROR   = "No fue posible completar la operación con los datos proporcionados."
 
 # KDF (Scrypt) para protección local de llaves privadas ECIES
 KDF_SALT_BYTES        = 32
@@ -202,21 +206,18 @@ def verify_signature(
     """
     if len(signature) != ED25519_SIG_BYTES:
         raise HybridVaultFormatError(
-            f"Firma inválida: se esperaban {ED25519_SIG_BYTES} bytes, "
-            f"se recibieron {len(signature)}."
+            GENERIC_FORMAT_ERROR
         )
     if len(signing_pub_bytes) != ED25519_PUB_BYTES:
         raise HybridVaultFormatError(
-            f"Clave pública del firmante inválida: se esperaban {ED25519_PUB_BYTES} bytes."
+            GENERIC_FORMAT_ERROR
         )
     try:
         public_key = Ed25519PublicKey.from_public_bytes(signing_pub_bytes)
         public_key.verify(signature, signed_data)
     except Exception as exc:
         raise HybridVaultSignatureError(
-            "La firma digital Ed25519 del contenedor NO es válida.\n"
-            "El contenedor pudo haber sido modificado, o la clave pública "
-            "del firmante no corresponde al firmante real."
+            GENERIC_AUTH_ERROR
         ) from exc
 
 
@@ -260,7 +261,7 @@ def recover_private_key(protected_bytes: bytes, password: str) -> str:
         HybridVaultFormatError:         Si el formato del blob es inválido.
     """
     if len(protected_bytes) < 1 + KDF_SALT_BYTES + NONCE_SIZE_BYTES + TAG_SIZE_BYTES + 1:
-        raise HybridVaultFormatError("Blob de llave protegida demasiado corto.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     buf     = io.BytesIO(protected_bytes)
     version = struct.unpack("B", buf.read(1))[0]
@@ -280,7 +281,7 @@ def recover_private_key(protected_bytes: bytes, password: str) -> str:
         return ChaCha20Poly1305(key).decrypt(nonce, combined, None).decode("utf-8")
     except InvalidTag as exc:
         raise HybridVaultAuthenticationError(
-            "Contraseña incorrecta o blob de llave protegida alterado."
+            GENERIC_AUTH_ERROR
         ) from exc
 
 
@@ -318,7 +319,7 @@ def _validate_header(header_bytes: bytes) -> dict:
     try:
         header = json.loads(header_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HybridVaultFormatError("Header inválido: no es JSON UTF-8 válido.") from exc
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR) from exc
 
     required_fields = {
         "magic",
@@ -339,34 +340,34 @@ def _validate_header(header_bytes: bytes) -> dict:
     missing = required_fields - set(header.keys())
     if missing:
         raise HybridVaultFormatError(
-            f"Header incompleto. Faltan campos: {sorted(missing)}"
+            GENERIC_FORMAT_ERROR
         )
 
     if header["magic"] != MAGIC:
-        raise HybridVaultFormatError("Magic inválido en header.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["container_version"] != CONTAINER_VERSION:
         raise HybridVaultFormatError(
             f"Versión de contenedor no soportada: {header['container_version']}. "
             f"Se esperaba: {CONTAINER_VERSION}."
         )
     if header["aead_algorithm"] != AEAD_ALGORITHM:
-        raise HybridVaultFormatError("Algoritmo AEAD no soportado.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["key_encryption_algorithm"] != KEY_ENCRYPTION_ALGORITHM:
-        raise HybridVaultFormatError("Algoritmo de cifrado de clave no soportado.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["signature_algorithm"] != SIGNATURE_ALGORITHM:
-        raise HybridVaultFormatError("Algoritmo de firma no soportado.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["key_size_bytes"] != KEY_SIZE_BYTES:
-        raise HybridVaultFormatError("Tamaño de clave inesperado en header.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["nonce_size_bytes"] != NONCE_SIZE_BYTES:
-        raise HybridVaultFormatError("Tamaño de nonce inesperado en header.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if header["tag_size_bytes"] != TAG_SIZE_BYTES:
-        raise HybridVaultFormatError("Tamaño de tag inesperado en header.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if not isinstance(header["plaintext_size"], int) or header["plaintext_size"] < 0:
-        raise HybridVaultFormatError("plaintext_size inválido.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if not isinstance(header["recipients_count"], int) or header["recipients_count"] < 1:
-        raise HybridVaultFormatError("recipients_count inválido (debe ser ≥ 1).")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if not isinstance(header["signer_id"], str) or len(header["signer_id"]) != 64:
-        raise HybridVaultFormatError("signer_id inválido (debe ser SHA-256 hex de 64 chars).")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     return header
 
@@ -392,7 +393,7 @@ def _serialize_recipients(recipients: list[dict]) -> bytes:
 def _deserialize_recipients(data: bytes) -> list[dict]:
     """Deserializa recipients desde bytes."""
     if len(data) < 4:
-        raise HybridVaultFormatError("Archivo recipients inválido o incompleto.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     recipients = []
     offset     = 0
@@ -405,11 +406,11 @@ def _deserialize_recipients(data: bytes) -> list[dict]:
             nonlocal offset
             sz = struct.calcsize(fmt)
             if offset + sz > len(data):
-                raise HybridVaultFormatError(f"Recipients truncado ({label}_len).")
+                raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
             (length,) = struct.unpack(fmt, data[offset:offset + sz])
             offset   += sz
             if offset + length > len(data):
-                raise HybridVaultFormatError(f"Recipients truncado ({label}).")
+                raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
             val     = data[offset:offset + length]
             offset += length
             return val
@@ -421,7 +422,7 @@ def _deserialize_recipients(data: bytes) -> list[dict]:
         })
 
     if offset != len(data):
-        raise HybridVaultFormatError("Archivo recipients tiene bytes extra o está corrupto.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     return recipients
 
@@ -474,7 +475,7 @@ def _read_container(
     Lee todos los componentes del contenedor de una sola vez.
     """
     if not container_dir.exists() or not container_dir.is_dir():
-        raise HybridVaultFormatError("El contenedor no existe o no es un directorio válido.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     try:
         header_bytes     = (container_dir / "header").read_bytes()
@@ -485,19 +486,17 @@ def _read_container(
         signature        = (container_dir / "signature").read_bytes()
     except FileNotFoundError as exc:
         raise HybridVaultFormatError(
-            f"Falta un componente del contenedor: {exc}"
+            GENERIC_FORMAT_ERROR
         ) from exc
 
     if len(nonce) != NONCE_SIZE_BYTES:
-        raise HybridVaultFormatError("Nonce inválido: tamaño incorrecto.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     if len(tag) != TAG_SIZE_BYTES:
-        raise HybridVaultFormatError("Authentication tag inválido: tamaño incorrecto.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
     # Validación temprana del tamaño de la firma antes de cualquier operación
     if len(signature) != ED25519_SIG_BYTES:
         raise HybridVaultSignatureError(
-            f"Archivo 'signature' tiene tamaño incorrecto ({len(signature)} bytes). "
-            f"Se esperaban {ED25519_SIG_BYTES} bytes. "
-            "El contenedor pudo haber sido manipulado."
+            GENERIC_FORMAT_ERROR
         )
 
     return header_bytes, recipients_bytes, nonce, ciphertext, tag, signature
@@ -537,19 +536,15 @@ def encrypt_file_for_recipients(
     output_dir = Path(output_dir)
 
     if not input_path.exists() or not input_path.is_file():
-        raise FileNotFoundError(f"Archivo de entrada no encontrado: {input_path}")
+        raise FileNotFoundError(GENERIC_FORMAT_ERROR)
+    if input_path.suffix.lower() not in ALLOWED_FILE_EXTENSIONS:
+        raise ValueError("Tipo de archivo no permitido.")
     if len(recipient_public_keys) < 1:
-        raise ValueError("Debes proporcionar al menos 1 recipient.")
+        raise ValueError(GENERIC_FORMAT_ERROR)
     if output_dir.exists():
-        raise FileExistsError(
-            f"Ya existe el directorio destino: {output_dir}. "
-            "Elige otra carpeta o renombra el existente."
-        )
+        raise FileExistsError(GENERIC_FORMAT_ERROR)
     if len(signing_private_key) != 32:
-        raise ValueError(
-            f"La clave privada Ed25519 debe tener 32 bytes, "
-            f"se recibieron {len(signing_private_key)}."
-        )
+        raise ValueError(GENERIC_FORMAT_ERROR)
 
     # ── 1. Leer plaintext ────────────────────────────────────────────────────
     plaintext = input_path.read_bytes()
@@ -564,7 +559,7 @@ def encrypt_file_for_recipients(
     for user_id, public_key_hex in recipient_public_keys.items():
         key_id = public_key_fingerprint(public_key_hex)
         if key_id in seen_key_ids:
-            raise ValueError(f"Clave pública duplicada para el recipient '{user_id}'.")
+            raise ValueError(GENERIC_FORMAT_ERROR)
         seen_key_ids.add(key_id)
         recipients.append({
             "id":            user_id,
@@ -658,7 +653,7 @@ def decrypt_file_for_recipient(
     recipients = _deserialize_recipients(recipients_bytes)
 
     if header["recipients_count"] != len(recipients):
-        raise HybridVaultFormatError("El número de recipients no coincide con el header.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     # ── 3. VERIFICAR FIRMA ANTES DE DESCIFRAR ────────────────────────────────
     signed_data = _build_signed_data(header_bytes, recipients_bytes, nonce, ciphertext, tag)
@@ -670,7 +665,7 @@ def decrypt_file_for_recipient(
     entry     = next((r for r in recipients if r["key_id"] == my_key_id), None)
     if entry is None:
         raise HybridVaultFormatError(
-            "No existe una entrada de recipient para esta clave pública."
+            GENERIC_FORMAT_ERROR
         )
 
     # ── 5. Recuperar file_key con ECIES ──────────────────────────────────────
@@ -678,11 +673,11 @@ def decrypt_file_for_recipient(
         file_key = ecies_decrypt(recipient_private_key_hex, entry["encrypted_key"])
     except Exception as exc:
         raise HybridVaultAuthenticationError(
-            "No fue posible recuperar la file key con la clave privada proporcionada."
+            GENERIC_AUTH_ERROR
         ) from exc
 
     if len(file_key) != KEY_SIZE_BYTES:
-        raise HybridVaultFormatError("La file key recuperada tiene tamaño inválido.")
+        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
     # ── 6. Descifrar con AEAD ────────────────────────────────────────────────
     aad      = header_bytes + recipients_bytes
@@ -691,13 +686,12 @@ def decrypt_file_for_recipient(
         plaintext = ChaCha20Poly1305(file_key).decrypt(nonce, combined, aad)
     except InvalidTag as exc:
         raise HybridVaultAuthenticationError(
-            "Falló la autenticación AEAD del contenedor. "
-            "El header, recipients, nonce, ciphertext o tag fueron alterados."
+            GENERIC_AUTH_ERROR
         ) from exc
 
     if len(plaintext) != header["plaintext_size"]:
         raise HybridVaultFormatError(
-            "El tamaño del plaintext descifrado no coincide con el header."
+            GENERIC_FORMAT_ERROR
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
