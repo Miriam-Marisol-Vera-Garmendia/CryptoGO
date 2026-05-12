@@ -338,27 +338,52 @@ Si la clave pública usada para cifrar es incorrecta, el destinatario real no po
 
 ### **1.1 Algoritmo elegido**
 
-- **Algoritmo utilizado**:  
-  
+- **Algoritmo utilizado**:
+Para implementar las firmas digitales se eligió **Ed25519**, ya que es un algoritmo moderno, rápido y seguro el cual se utiliza principalmente para comprobar quién creó el archivo y asegurarse de que no ha sido modificado después de ser firmado
 
-- **Razón de elección**:  
-  
+- **Razón de elección**:
+La principal razón para usar este algoritmo es que ofrece una seguridad muy alta con claves y firmas muy pequeñas a diferencia de otros algoritmos más antiguos como RSA, y que al generar firmas compactas no agrega mucho peso al contenedor. Además, es determinista lo que significa que si se firma el mismo contenido dos veces se obtiene exactamente la misma firma lo que facilita su verificación.
+Cabe mencionar que cada firma incluye `signer_id` que se genera a partir de la clave pública del usuario lo cual permite que el receptor pueda saber exactamente quién firmó el archivo y verificar la firma correctamente.
 
 ### **1.2 ¿Qué datos se firman?**
 
-- **Datos incluidos en la firma**:  
-  
+La firma se aplica a varias partes importantes del contenedor entre las cuales se encuentran:
 
-- **Importancia de firmar estos datos**:  
-  
+- Los **metadatos** que es la información como nombre del archivo, fecha, versión, etc
+- La **lista de destinatarios** es la lista de usuarios que pueden acceder al archivo
+- El **nonce** es el valor usado en el cifrado
+- El **ciphertext** que es básicamente el archivo cifrado
+- La **tag** el cual es el control de autenticación del archivo
+
+Esto es importante porque evita que alguien pueda modificar alguna parte del contenedor sin ser detectado; por ejemplo un atacante no podría cambiar el nombre del archivo, alterar la lista de destinatarios o modificar el contenido sin que la firma deje de ser válida y de esta manera se garantiza la integridad del archivo.
 
 ### **1.3 ¿Por qué se requiere hashing antes de firmar?**
 
-- **Función del hash**:  
-  
+En este sistema no se calcula un hash por separado antes de firmar, ya que al estar usando el algoritmo Ed25519, este incluye internamente el uso de hashing como parte de su funcionamiento lo que significa que, aunque en el código no se vea un paso explícito de “primero hacer hash y luego firmar”, en realidad ese proceso sí ocurre dentro del algoritmo. Es decir, Ed25519 toma los datos que se quieren proteger y aplica internamente las operaciones necesarias para generar una firma segura.
 
-- **Relación con la integridad**:  
-  
+El hashing permite detectar cualquier cambio en los datos ya que si alguien modifica aunque sea un solo byte del contenedor ya sea el archivo cifrado, los metadatos o la lista de destinatarios, la firma dejará de ser válida y el sistema lo rechazará automáticamente.
+
+Gracias a esto, el sistema puede asegurar dos cosas importantes: 
+- Que el contenido no fue alterado 
+- Que realmente proviene del usuario que lo firmó. 
+Por eso, antes de descifrar el archivo, primero se verifica la firma, y si algo no coincide, el archivo se rechaza automáticamente.
+
+### **1.4 ¿Cómo se ve el flujo completo?**
+
+- **Al crear un archivo**
+  - Primero se cifra el contenido 
+  - Luego se agregan los metadatos y la lista de destinatarios 
+  - Y al final se firma todo junto antes de guardar el contenedor
+  - Nada se firma antes de estar completo
+
+- **Al abrir un archivo**
+  - Primero se lee el contenedor 
+  - Se identifica al firmante 
+  - Se verifica la firma 
+  - Y solo si todo está correcto se procede a descifrar
+  - Si la firma no es válida, el archivo se rechaza sin importar nada más
+
+Esta verificación es lo que garantiza que el archivo realmente viene de quien dice ser, y que nadie lo modificó en el camino
 
 ## **2. Decisiones de Seguridad**
 

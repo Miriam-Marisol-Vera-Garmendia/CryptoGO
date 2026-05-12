@@ -18,6 +18,38 @@ from encryption import (
     HybridVaultFormatError,
     HybridVaultSignatureError,
 )
+import logging
+import traceback
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Seguridad: mensaje genérico y logger local (sin exponer detalles al usuario)
+# ──────────────────────────────────────────────────────────────────────────────
+
+GENERIC_CONTAINER_ERROR = (
+    "No fue posible procesar la operación.\n\n"
+    "Verifica que el archivo, las llaves y el contenedor sean correctos."
+)
+
+_security_logger = logging.getLogger("cryptogo.security")
+if not _security_logger.handlers:
+    _log_path = Path(__file__).parent / "security.log"
+    _handler  = logging.FileHandler(_log_path, encoding="utf-8")
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s  %(levelname)s  %(message)s", datefmt="%Y-%m-%dT%H:%M:%S"
+    ))
+    _security_logger.addHandler(_handler)
+    _security_logger.setLevel(logging.WARNING)
+
+
+def log_security_error(context: str, exc: BaseException) -> None:
+    """Registra el error completo sólo en el log local; nunca lo muestra al usuario."""
+    _security_logger.warning(
+        "[%s] %s: %s\n%s",
+        context,
+        type(exc).__name__,
+        exc,
+        traceback.format_exc(),
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -34,6 +66,7 @@ SUCCESS    = "#059669"
 WARNING    = "#d97706"
 DANGER     = "#be123c"
 TEXT       = "#1e1030"
+TEXT_D   = "#ffffff"
 TEXT_DIM   = "#6b7280"
 BORDER     = "#ddd6fe"
 
@@ -114,6 +147,21 @@ selected_file: str | None = None
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
 _remove_buttons: dict = {}
 
+# Tipos de archivo permitidos para cifrado
+ALLOWED_FILE_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps"}
+ALLOWED_FILETYPES = [
+    ("Archivos permitidos", "*.pdf *.epub *.png *.jpg *.jpeg *.xps"),
+    ("PDF", "*.pdf"),
+    ("EPUB", "*.epub"),
+    ("Imágenes", "*.png *.jpg *.jpeg"),
+    ("XPS", "*.xps"),
+]
+
+
+def is_allowed_file(path: str | Path) -> bool:
+    """Valida que el archivo tenga una extensión permitida."""
+    return Path(path).suffix.lower() in ALLOWED_FILE_EXTENSIONS
+
 def copy_to_clipboard(text: str):
     root.clipboard_clear()
     root.clipboard_append(text)
@@ -152,19 +200,19 @@ def _resolve_container(base_dir: str) -> Path | None:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  Ventana: Generar par de claves ECIES (para cifrado)
+#  Ventana: Generar par de claves de acceso
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_keygen_window():
     win = tk.Toplevel(root)
-    win.title("Generar par de claves ECIES (cifrado)")
+    win.title("Generar par de llaves de acceso")
     win.geometry("700x390")
     win.resizable(False, False)
     win.configure(bg=BG)
 
-    tk.Label(win, text="Generador de claves ECIES", bg=BG, fg=TEXT,
+    tk.Label(win, text="Generador de llaves de acceso", bg=BG, fg=TEXT,
              font=("Segoe UI", 13, "bold")).pack(pady=(16, 2))
-    tk.Label(win, text="Par de claves para cifrado/descifrado de archivos (secp256k1)",
+    tk.Label(win, text="Par de llaves para proteger y recuperar archivos",
              bg=BG, fg=TEXT_DIM, font=("Segoe UI", 9)).pack()
 
     frame = tk.Frame(win, bg=BG_PANEL, padx=16, pady=14,
@@ -174,14 +222,14 @@ def open_keygen_window():
     priv_hex = tk.StringVar()
     pub_hex  = tk.StringVar()
 
-    tk.Label(frame, text="Clave pública  —  comparte con quien cifrará para ti",
+    tk.Label(frame, text="Llave pública  —  comparte con quien cifrará para ti",
              bg=BG_PANEL, fg=TEXT, font=("Segoe UI", 8, "bold")).pack(anchor="w")
     pub_entry = tk.Entry(frame, width=92, bg=BG_INPUT, fg=TEXT, relief="flat",
                          font=("Consolas", 8), highlightthickness=1,
                          highlightbackground=BORDER, state="readonly")
     pub_entry.pack(fill="x", pady=(2, 8))
 
-    tk.Label(frame, text="Clave privada  —  NO la compartas nunca",
+    tk.Label(frame, text="Llave privada  —  NO la compartas nunca",
              bg=BG_PANEL, fg=DANGER, font=("Segoe UI", 8, "bold")).pack(anchor="w")
     priv_entry = tk.Entry(frame, width=92, bg=BG_INPUT, fg=DANGER, relief="flat",
                           font=("Consolas", 8), show="•", highlightthickness=1,
@@ -199,7 +247,7 @@ def open_keygen_window():
             entry.config(state="normal"); entry.delete(0, "end")
             entry.insert(0, val); entry.config(state="readonly", show=show)
         fp_var.set(f"Huella: {public_key_fingerprint(pub)}")
-        set_status("✔ Par de claves ECIES generado.", SUCCESS)
+        set_status("✔ Par de llaves generado.", SUCCESS)
 
     def toggle_priv():
         s = priv_entry.cget("show")
@@ -209,23 +257,23 @@ def open_keygen_window():
     def copy_pub():
         if pub_hex.get():
             copy_to_clipboard(pub_hex.get())
-            messagebox.showinfo("Copiado", "Clave pública copiada.", parent=win)
+            messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
 
     def copy_priv():
         if priv_hex.get():
             copy_to_clipboard(priv_hex.get())
-            messagebox.showinfo("Copiado", "Clave privada copiada.", parent=win)
+            messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
 
     def save_protected():
         if not priv_hex.get():
-            messagebox.showwarning("Sin clave", "Genera un par primero.", parent=win)
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
             return
         pw_win = tk.Toplevel(win)
-        pw_win.title("Proteger clave privada ECIES")
+        pw_win.title("Proteger llave privada")
         pw_win.geometry("440x200")
         pw_win.configure(bg=BG)
         pw_win.resizable(False, False)
-        tk.Label(pw_win, text="Contraseña para cifrar la clave privada ECIES",
+        tk.Label(pw_win, text="Contraseña para proteger la llave privada",
                  bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(pady=(16, 4))
         tk.Label(pw_win, text="Mínimo 8 caracteres.",
                  bg=BG, fg=WARNING, font=("Segoe UI", 8)).pack()
@@ -240,7 +288,8 @@ def open_keygen_window():
             try:
                 protected = protect_private_key(priv_hex.get(), pw)
             except Exception as e:
-                messagebox.showerror("Error", str(e), parent=pw_win); return
+                log_security_error("protect_key", e)
+                messagebox.showerror("Error", "No fue posible proteger la llave.", parent=pw_win); return
             path = filedialog.asksaveasfilename(
                 parent=pw_win, title="Guardar .vkey",
                 defaultextension=".vkey",
@@ -249,7 +298,7 @@ def open_keygen_window():
             if path:
                 Path(path).write_bytes(protected)
                 messagebox.showinfo("Guardado", f"Guardada en:\n{path}", parent=pw_win)
-                set_status("✔ Clave ECIES protegida guardada.", SUCCESS)
+                set_status("✔ Llave protegida guardada.", SUCCESS)
                 pw_win.destroy()
 
         StyledButton(pw_win, "🔒 Cifrar y guardar", do_save, color=TEAL).pack()
@@ -264,7 +313,7 @@ def open_keygen_window():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  Ventana: Generar par de claves Ed25519 (para firma digital)
+#  Ventana: Generar par de claves de firma
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_signing_keygen_window():
@@ -274,14 +323,14 @@ def open_signing_keygen_window():
     Internamente el módulo opera con bytes raw (32B privada, 32B pública).
     """
     win = tk.Toplevel(root)
-    win.title("Generar claves de firma Ed25519")
+    win.title("Generar llaves de firma")
     win.geometry("700x400")
     win.resizable(False, False)
     win.configure(bg=BG)
 
-    tk.Label(win, text="Generador de claves de firma Ed25519", bg=BG, fg=TEXT,
+    tk.Label(win, text="Generador de llaves de firma", bg=BG, fg=TEXT,
              font=("Segoe UI", 13, "bold")).pack(pady=(16, 2))
-    tk.Label(win, text="Par de claves para firmar y verificar contenedores (D4)",
+    tk.Label(win, text="Par de llaves para firmar y verificar contenedores",
              bg=BG, fg=TEXT_DIM, font=("Segoe UI", 9)).pack()
 
     frame = tk.Frame(win, bg=BG_PANEL, padx=16, pady=14,
@@ -292,7 +341,7 @@ def open_signing_keygen_window():
     pub_hex_var  = tk.StringVar()
 
     tk.Label(frame,
-             text="Clave pública Ed25519 (hex)  —  comparte con quien verificará tu firma",
+             text="Llave pública de firma  —  comparte con quien verificará tu firma",
              bg=BG_PANEL, fg=TEXT, font=("Segoe UI", 8, "bold")).pack(anchor="w")
     pub_entry = tk.Entry(frame, width=92, bg=BG_INPUT, fg=TEXT, relief="flat",
                          font=("Consolas", 8), highlightthickness=1,
@@ -300,7 +349,7 @@ def open_signing_keygen_window():
     pub_entry.pack(fill="x", pady=(2, 8))
 
     tk.Label(frame,
-             text="Clave privada Ed25519 (hex)  —  NO la compartas nunca",
+             text="Llave privada de firma  —  NO la compartas nunca",
              bg=BG_PANEL, fg=DANGER, font=("Segoe UI", 8, "bold")).pack(anchor="w")
     priv_entry = tk.Entry(frame, width=92, bg=BG_INPUT, fg=DANGER, relief="flat",
                           font=("Consolas", 8), show="•", highlightthickness=1,
@@ -319,8 +368,8 @@ def open_signing_keygen_window():
         for entry, val, show in [(pub_entry, pub_h, ""), (priv_entry, priv_h, "•")]:
             entry.config(state="normal"); entry.delete(0, "end")
             entry.insert(0, val); entry.config(state="readonly", show=show)
-        sid_var.set(f"signer_id (SHA-256 de pub): {sid}")
-        set_status("✔ Par de claves Ed25519 generado.", SUCCESS)
+        sid_var.set(f"Identificador de firma: {sid}")
+        set_status("✔ Par de llaves de firma generado.", SUCCESS)
 
     def toggle_priv():
         s = priv_entry.cget("show")
@@ -330,36 +379,36 @@ def open_signing_keygen_window():
     def copy_pub():
         if pub_hex_var.get():
             copy_to_clipboard(pub_hex_var.get())
-            messagebox.showinfo("Copiado", "Clave pública Ed25519 copiada.", parent=win)
+            messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
 
     def copy_priv():
         if priv_hex_var.get():
             copy_to_clipboard(priv_hex_var.get())
-            messagebox.showinfo("Copiado", "Clave privada Ed25519 copiada.", parent=win)
+            messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
 
     def save_keys():
         """Guarda las claves en archivos de texto con el valor hex, igual a lo que se muestra en pantalla."""
         if not pub_hex_var.get():
-            messagebox.showwarning("Sin clave", "Genera un par primero.", parent=win)
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
             return
         pub_path = filedialog.asksaveasfilename(
-            parent=win, title="Guardar clave pública Ed25519",
+            parent=win, title="Guardar llave pública",
             defaultextension=".txt",
             filetypes=[("Texto hex", "*.txt"), ("Todos", "*.*")],
         )
         if pub_path:
             Path(pub_path).write_text(pub_hex_var.get(), encoding="utf-8")
-            messagebox.showinfo("Guardado", f"Clave pública guardada en:\n{pub_path}", parent=win)
+            messagebox.showinfo("Guardado", f"Llave pública guardada en:\n{pub_path}", parent=win)
 
         priv_path = filedialog.asksaveasfilename(
-            parent=win, title="Guardar clave privada Ed25519",
+            parent=win, title="Guardar llave privada",
             defaultextension=".txt",
             filetypes=[("Texto hex", "*.txt"), ("Todos", "*.*")],
         )
         if priv_path:
             Path(priv_path).write_text(priv_hex_var.get(), encoding="utf-8")
-            messagebox.showinfo("Guardado", f"Clave privada guardada en:\n{priv_path}", parent=win)
-            set_status("✔ Claves Ed25519 guardadas.", SUCCESS)
+            messagebox.showinfo("Guardado", f"Llave privada guardada en:\n{priv_path}", parent=win)
+            set_status("✔ Llaves de firma guardadas.", SUCCESS)
 
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
@@ -371,17 +420,17 @@ def open_signing_keygen_window():
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  Ventana: Recuperar clave privada ECIES desde .vkey
+#  Ventana: Recuperar clave privada desde .vkey
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_recover_key_window():
     win = tk.Toplevel(root)
-    win.title("Recuperar clave privada ECIES (.vkey)")
+    win.title("Recuperar llave privada (.vkey)")
     win.geometry("580x260")
     win.configure(bg=BG)
     win.resizable(False, False)
 
-    tk.Label(win, text="Recuperar clave privada ECIES protegida", bg=BG, fg=TEXT,
+    tk.Label(win, text="Recuperar llave privada protegida", bg=BG, fg=TEXT,
              font=("Segoe UI", 12, "bold")).pack(pady=(14, 2))
 
     frame = tk.Frame(win, bg=BG_PANEL, padx=14, pady=12,
@@ -420,16 +469,18 @@ def open_recover_key_window():
         try:
             priv = recover_private_key(Path(key_path["path"]).read_bytes(), pw_entry.get())
             result_var.set(priv)
-            set_status("✔ Clave ECIES recuperada.", SUCCESS)
-        except HybridVaultAuthenticationError:
-            messagebox.showerror("Error", "Contraseña incorrecta o archivo corrupto.", parent=win)
+            set_status("✔ Llave recuperada.", SUCCESS)
+        except HybridVaultAuthenticationError as e:
+            log_security_error("recover_key_auth", e)
+            messagebox.showerror("Error", "No fue posible recuperar la llave.", parent=win)
         except Exception as e:
-            messagebox.showerror("Error", str(e), parent=win)
+            log_security_error("recover_key_unexpected", e)
+            messagebox.showerror("Error", "No fue posible recuperar la llave.", parent=win)
 
     def copy_result():
         if result_var.get():
             copy_to_clipboard(result_var.get())
-            messagebox.showinfo("Copiado", "Clave copiada.", parent=win)
+            messagebox.showinfo("Copiado", "Llave copiada.", parent=win)
 
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
@@ -452,9 +503,11 @@ def open_inspect_window():
     try:
         info = get_container_info(container_path)
     except (HybridVaultFormatError, HybridVaultSignatureError) as e:
-        messagebox.showerror("Error", str(e)); return
+        log_security_error("inspect_container", e)
+        messagebox.showerror("Error", GENERIC_CONTAINER_ERROR); return
     except Exception as e:
-        messagebox.showerror("Error", str(e)); return
+        log_security_error("inspect_unexpected", e)
+        messagebox.showerror("Error", GENERIC_CONTAINER_ERROR); return
 
     win = tk.Toplevel(root)
     win.title("Inspección del contenedor")
@@ -477,10 +530,10 @@ def open_inspect_window():
         f"  Fecha de creación  : {info['created_at']}",
         f"  Tamaño original    : {info['plaintext_size']:,} bytes",
         f"  Versión contenedor : {info['container_version']}",
-        f"  Algoritmo de firma : {info['signature_algorithm']}",
-        f"  signer_id          : {info['signer_id']}",
+        f"  Verificación       : disponible",
+        f"  Identificador      : {info['signer_id']}",
         "",
-        f"  Recipients ({len(info['recipients'])}):",
+        f"  Usuarios autorizados ({len(info['recipients'])}):",
     ]
     for r in info["recipients"]:
         lines.append(f"    • {r['id']}   [{r['key_id']}]")
@@ -513,7 +566,7 @@ def add_recipient_row(name_default="", key_default=""):
     name_entry.insert(0, name_default)
     name_entry.pack(side="left", padx=(2, 6))
 
-    tk.Label(frame, text="Clave pública ECIES:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(frame, text="Llave pública:", bg=BG_PANEL, fg=TEXT_DIM,
              font=("Segoe UI", 8), width=18, anchor="e").pack(side="left")
     key_entry = StyledEntry(frame, width=46)
     key_entry.insert(0, key_default)
@@ -550,8 +603,20 @@ def add_recipient_row(name_default="", key_default=""):
 
 def select_file():
     global selected_file
-    path = filedialog.askopenfilename(title="Seleccionar archivo a cifrar")
+    path = filedialog.askopenfilename(
+        title="Seleccionar archivo a cifrar",
+        filetypes=ALLOWED_FILETYPES,
+    )
     if path:
+        if not is_allowed_file(path):
+            selected_file = None
+            label_file.config(text="Ningún archivo seleccionado", fg=TEXT_DIM)
+            messagebox.showerror(
+                "Archivo no permitido",
+                "El tipo de archivo seleccionado no está permitido.\n\n"
+                "Formatos aceptados: PDF, EPUB, PNG, JPG/JPEG y XPS.",
+            )
+            return
         selected_file = path
         label_file.config(text=Path(path).name, fg=TEXT)
         set_status(f"Archivo listo: {Path(path).name}")
@@ -562,28 +627,34 @@ def encrypt():
         messagebox.showerror("Error", "Selecciona un archivo primero.")
         return
 
+    if not is_allowed_file(selected_file):
+        messagebox.showerror(
+            "Archivo no permitido",
+            "El tipo de archivo seleccionado no está permitido.\n\n"
+            "Formatos aceptados: PDF, EPUB, PNG, JPG/JPEG y XPS.",
+        )
+        return
+
     recipients = get_recipients()
     if not recipients:
         messagebox.showerror("Error",
-                             "Agrega al menos 1 recipient con nombre y clave pública ECIES.")
+                             "Agrega al menos 1 recipient con nombre y llave pública.")
         return
 
     # Leer clave privada Ed25519 del firmante (hex → bytes)
     signing_priv_hex = entry_signing_priv.get().strip()
     if not signing_priv_hex:
         messagebox.showerror("Error",
-                             "Ingresa tu clave privada Ed25519 para firmar el contenedor.")
+                             "Ingresa tu llave privada de firma para firmar el contenedor.")
         return
     try:
         signing_priv_bytes = bytes.fromhex(signing_priv_hex)
     except ValueError:
         messagebox.showerror("Error",
-                             "La clave privada Ed25519 no es hexadecimal válido.")
+                             "La llave ingresada no es válida.")
         return
     if len(signing_priv_bytes) != 32:
-        messagebox.showerror("Error",
-                             f"La clave privada Ed25519 debe tener 32 bytes (64 hex chars). "
-                             f"Se recibieron {len(signing_priv_bytes)} bytes.")
+        messagebox.showerror("Error", "La llave ingresada no es válida.")
         return
 
     output_dir = filedialog.askdirectory(title="Seleccionar carpeta de destino")
@@ -606,19 +677,22 @@ def encrypt():
         set_status(f"✔ Cifrado y firmado → {result.name}", SUCCESS)
         messagebox.showinfo(
             "Cifrado y firmado exitoso",
-            f"✔ Archivo cifrado y firmado con Ed25519.\n\n"
+            f"✔ Archivo cifrado y firmado correctamente.\n\n"
             f"Contenedor:\n{result}\n\n"
             f"Recipients: {', '.join(recipients.keys())}",
         )
     except FileExistsError as e:
-        set_status("Error: directorio destino ya existe.", DANGER)
-        messagebox.showerror("Error", str(e))
+        log_security_error("encrypt_output_exists", e)
+        set_status("No se pudo completar la operación.", DANGER)
+        messagebox.showerror("No se pudo completar", GENERIC_CONTAINER_ERROR)
     except ValueError as e:
-        set_status("Error de configuración.", DANGER)
-        messagebox.showerror("Error de configuración", str(e))
+        log_security_error("encrypt_validation", e)
+        set_status("No se pudo completar la operación.", DANGER)
+        messagebox.showerror("No se pudo completar", GENERIC_CONTAINER_ERROR)
     except Exception as e:
-        set_status("Error inesperado.", DANGER)
-        messagebox.showerror("Error inesperado", str(e))
+        log_security_error("encrypt_unexpected", e)
+        set_status("No se pudo completar la operación.", DANGER)
+        messagebox.showerror("No se pudo completar", GENERIC_CONTAINER_ERROR)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -638,24 +712,22 @@ def decrypt():
     signing_pub_hex = entry_dec_signing_pub.get().strip()
 
     if not priv_key:
-        messagebox.showerror("Error", "Introduce tu clave privada ECIES."); return
+        messagebox.showerror("Error", "Introduce tu llave privada."); return
     if not pub_key:
-        messagebox.showerror("Error", "Introduce tu clave pública ECIES."); return
+        messagebox.showerror("Error", "Introduce tu llave pública."); return
     if not signing_pub_hex:
         messagebox.showerror("Error",
-                             "Introduce la clave pública Ed25519 del firmante.\n\n"
+                             "Introduce la llave pública de firma del remitente.\n\n"
                              "Es obligatoria para verificar la firma antes de descifrar.")
         return
 
     try:
         signing_pub_bytes = bytes.fromhex(signing_pub_hex)
     except ValueError:
-        messagebox.showerror("Error", "La clave pública Ed25519 no es hexadecimal válido.")
+        messagebox.showerror("Error", "La llave ingresada no es válida.")
         return
     if len(signing_pub_bytes) != 32:
-        messagebox.showerror("Error",
-                             f"La clave pública Ed25519 debe tener 32 bytes (64 hex chars). "
-                             f"Se recibieron {len(signing_pub_bytes)} bytes.")
+        messagebox.showerror("Error", "La llave ingresada no es válida.")
         return
 
     # Leer el nombre original del archivo desde los metadatos del contenedor
@@ -682,7 +754,7 @@ def decrypt():
     if not output_file:
         return
 
-    set_status("Verificando firma y descifrando…", ACCENT)
+    set_status("Verificando y descifrando…", ACCENT)
     root.update()
 
     try:
@@ -693,52 +765,30 @@ def decrypt():
             output_path               = output_file,
             signing_public_key        = signing_pub_bytes,
         )
-        set_status(f"✔ Firma verificada y descifrado completado → {result_path.name}", SUCCESS)
+        set_status(f"✔ Verificación y descifrado completados → {result_path.name}", SUCCESS)
         messagebox.showinfo(
             "Descifrado exitoso",
-            f"✔ Firma Ed25519 verificada correctamente.\n"
-            f"✔ Contenedor descifrado y autenticado (AEAD).\n\n"
+            f"✔ Firma verificada correctamente.\n"
+            f"✔ Contenedor descifrado y autenticado.\n\n"
             f"Guardado en  : {result_path}\n\n"
             f"Archivo      : {info['original_filename']}\n"
             f"Creado       : {info['created_at']}\n"
-            f"signer_id    : {info['signer_id']}\n"
+            f"Identificador: {info['signer_id']}\n"
             f"Tamaño       : {info['plaintext_size']:,} bytes",
         )
 
-    except HybridVaultSignatureError as e:
-        # La firma es inválida → el archivo NO se descifra
-        set_status("⚠️ FIRMA INVÁLIDA — descifrado rechazado.", DANGER)
-        messagebox.showerror(
-            "⚠️ ALERTA DE SEGURIDAD — Firma digital inválida",
-            "La firma Ed25519 del contenedor NO es válida.\n\n"
-            "Esto puede significar:\n"
-            "  • El contenedor fue modificado después de ser firmado.\n"
-            "  • La clave pública del firmante no corresponde al firmante real.\n"
-            "  • Un atacante alteró el ciphertext, los metadatos o los recipients.\n\n"
-            f"Detalle técnico:\n{e}\n\n"
-            "⛔ El archivo NO fue descifrado.",
-        )
-
-    except HybridVaultAuthenticationError:
-        set_status("⚠️ Autenticación AEAD fallida — contenedor alterado o clave incorrecta.", DANGER)
-        messagebox.showerror(
-            "⚠️ ALERTA DE SEGURIDAD — Autenticación fallida",
-            "Las claves ECIES no son válidas para este contenedor,\n"
-            "o el contenedor fue modificado después de ser cifrado.\n\n"
-            "Posibles causas:\n"
-            "  • Clave privada o pública ECIES incorrecta.\n"
-            "  • Header, recipients, ciphertext o tag alterados.\n\n"
-            "⛔ El archivo NO fue descifrado.",
-        )
-
-    except HybridVaultFormatError as e:
-        set_status("Error de formato en el contenedor.", DANGER)
-        messagebox.showerror("Error de formato",
-                             f"El contenedor está dañado o es inválido:\n\n{e}")
+    except (HybridVaultSignatureError, HybridVaultAuthenticationError, HybridVaultFormatError) as e:
+        # No revelar si falló la firma, la clave, AEAD o el formato.
+        # Los detalles se guardan únicamente en logs locales de seguridad.
+        log_security_error("decrypt_container", e)
+        set_status("No se pudo procesar el contenedor.", DANGER)
+        messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
 
     except Exception as e:
-        set_status("Error inesperado.", DANGER)
-        messagebox.showerror("Error inesperado", str(e))
+        # También evitar filtrar rutas, trazas o mensajes internos en errores inesperados.
+        log_security_error("decrypt_unexpected", e)
+        set_status("No se pudo procesar el contenedor.", DANGER)
+        messagebox.showerror("No se pudo procesar el contenedor", GENERIC_CONTAINER_ERROR)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -746,7 +796,7 @@ def decrypt():
 # ──────────────────────────────────────────────────────────────────────────────
 
 root = tk.Tk()
-root.title("CryptoGO Secure Vault")
+root.title("CryptoGO")
 root.configure(bg=BG)
 
 # Tamaño inicial: 90% de la pantalla disponible, máximo 800x900
@@ -789,9 +839,9 @@ _root = _inner   # alias para no cambiar el resto del código
 
 # ── Cabecera ──────────────────────────────────────────────────────────────────
 tk.Frame(_root, bg=CHERRY, height=5).pack(fill="x")
-tk.Label(_root, text="CryptoGO Secure Vault", bg=BG, fg=TEXT,
+tk.Label(_root, text="CryptoGO", bg=BG, fg=TEXT,
          font=("Segoe UI", 18, "bold")).pack(pady=(12, 0))
-tk.Label(_root, text="ECIES  ·  ChaCha20-Poly1305  ·  Ed25519",
+tk.Label(_root, text="Protección de archivos  ·  Firma digital  ·  Verificación",
          bg=BG, fg=VIOLET, font=("Segoe UI", 9)).pack(pady=(0, 8))
 
 # ── Barra de herramientas ─────────────────────────────────────────────────────
@@ -799,9 +849,9 @@ tools_frame = tk.Frame(_root, bg=BG_PANEL, pady=6, padx=14,
                        highlightthickness=1, highlightbackground=BORDER)
 tools_frame.pack(fill="x", padx=14, pady=2)
 
-StyledButton(tools_frame, "🔑 Claves ECIES",
+StyledButton(tools_frame, "🔑 Llaves de acceso",
              open_keygen_window, color=VIOLET).pack(side="left", padx=3)
-StyledButton(tools_frame, "✍️ Claves de firma Ed25519",
+StyledButton(tools_frame, "✍️ Llaves de firma",
              open_signing_keygen_window, color=CHERRY).pack(side="left", padx=3)
 StyledButton(tools_frame, "🔓 Recuperar .vkey",
              open_recover_key_window, color=INDIGO).pack(side="left", padx=3)
@@ -822,7 +872,7 @@ label_file = tk.Label(row_file, text="Ningún archivo seleccionado",
 label_file.pack(side="left", padx=10)
 
 # Clave privada Ed25519 del firmante
-lbl(enc_body, "Tu clave privada Ed25519 (hex, 64 chars)  —  para firmar el contenedor:",
+lbl(enc_body, "Tu llave privada de firma — para firmar el contenedor:",
     bold=True, color=DANGER).pack(anchor="w", pady=(10, 0))
 entry_signing_priv = StyledEntry(enc_body, show_char="•", width=82)
 entry_signing_priv.pack(fill="x", pady=(2, 2))
@@ -831,12 +881,12 @@ sign_toggle = {"show": False}
 def _toggle_signing_priv():
     sign_toggle["show"] = not sign_toggle["show"]
     entry_signing_priv.config(show="" if sign_toggle["show"] else "•")
-tk.Button(enc_body, text="Ver / Ocultar clave privada Ed25519",
-          bg=BG_HOVER, fg=TEXT_DIM, relief="flat", font=("Segoe UI", 8),
+tk.Button(enc_body, text="Ver / Ocultar llave privada",
+          bg=BG_HOVER, fg=TEXT_D, relief="flat", font=("Segoe UI", 8),
           cursor="hand2", command=_toggle_signing_priv).pack(anchor="w", pady=(0, 6))
 
-# Recipients con clave pública ECIES
-lbl(enc_body, "Recipients — nombre y clave pública ECIES (mínimo 1):",
+# Recipients con llave pública ECIES
+lbl(enc_body, "Recipients — nombre y llave pública (mínimo 1):",
     bold=True).pack(anchor="w")
 recipients_frame = tk.Frame(enc_body, bg=BG_PANEL)
 recipients_frame.pack(fill="x")
@@ -854,15 +904,15 @@ hsep(_root)
 # ── Sección: Descifrar ────────────────────────────────────────────────────────
 dec_body = make_section(_root, "🔓  DESCIFRAR Y VERIFICAR FIRMA")
 
-lbl(dec_body, "Tu clave privada ECIES (hex):", bold=True, color=DANGER).pack(anchor="w")
+lbl(dec_body, "Tu llave privada:", bold=True, color=DANGER).pack(anchor="w")
 entry_dec_priv = StyledEntry(dec_body, show_char="•", width=82)
 entry_dec_priv.pack(fill="x", pady=(2, 8))
 
-lbl(dec_body, "Tu clave pública ECIES (hex):", bold=True).pack(anchor="w")
+lbl(dec_body, "Tu llave pública:", bold=True).pack(anchor="w")
 entry_dec_pub = StyledEntry(dec_body, width=82)
 entry_dec_pub.pack(fill="x", pady=(2, 8))
 
-lbl(dec_body, "Clave pública Ed25519 del firmante (hex, 64 chars)  —  obligatoria:",
+lbl(dec_body, "Llave pública de firma del remitente — obligatoria:",
     bold=True, color=WARNING).pack(anchor="w")
 entry_dec_signing_pub = StyledEntry(dec_body, width=82)
 entry_dec_signing_pub.pack(fill="x", pady=(2, 8))
