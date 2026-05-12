@@ -17,6 +17,7 @@ from encryption import (
     HybridVaultAuthenticationError,
     HybridVaultFileSizeError,
     HybridVaultFormatError,
+    HybridVaultRateLimitError,
     HybridVaultSignatureError,
 )
 import logging
@@ -77,6 +78,53 @@ ROSE       = "#db2777"   # rosa — copiar, secundarios
 VIOLET     = "#7c3aed"   # morado — generar, claves principales
 INDIGO     = "#4338ca"   # índigo — inspeccionar, recuperar
 TEAL       = "#0d9488"   # verde azulado — guardar protegida
+
+# Limitación de intentos de brute force en recuperación de contraseña (Fix KEYS-004)
+import time
+recover_attempts = {}  # {vkey_path: {"count": int, "locked_until": timestamp}}
+MAX_RECOVERY_ATTEMPTS = 10
+RECOVERY_LOCKOUT_SECONDS = 300  # 5 minutos
+
+def check_recovery_attempts(vkey_path: str) -> bool:
+    """
+    Verifica si se pueden hacer más intentos de recuperación.
+    Lanza ValueError si está bloqueado por demasiados intentos fallidos.
+    """
+    now = time.time()
+    
+    if vkey_path not in recover_attempts:
+        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    
+    attempt_data = recover_attempts[vkey_path]
+    
+    # Si está bloqueado, verificar si pasó el tiempo
+    if attempt_data["locked_until"] > now:
+        raise ValueError(
+            f"Acceso bloqueado. Intenta nuevamente más tarde."
+        )
+    
+    # Si pasó el tiempo de bloqueo, resetear
+    if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
+        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    
+    return True
+
+def increment_recovery_attempt(vkey_path: str) -> None:
+    """Incrementa contador de intentos fallidos."""
+    if vkey_path not in recover_attempts:
+        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    
+    attempt_data = recover_attempts[vkey_path]
+    attempt_data["count"] += 1
+    
+    # Si alcanza el máximo, bloquear por 5 minutos
+    if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
+        attempt_data["locked_until"] = time.time() + RECOVERY_LOCKOUT_SECONDS
+
+def reset_recovery_attempts(vkey_path: str) -> None:
+    """Resetea intentos tras recuperación exitosa."""
+    if vkey_path in recover_attempts:
+        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -467,14 +515,42 @@ def open_recover_key_window():
     def do_recover():
         if not key_path["path"]:
             messagebox.showwarning("Sin archivo", "Selecciona un .vkey.", parent=win); return
+        
         try:
+            # Verificar límite de intentos (Fix KEYS-004)
+            check_recovery_attempts(key_path["path"])
+            
             priv = recover_private_key(Path(key_path["path"]).read_bytes(), pw_entry.get())
             result_var.set(priv)
+            reset_recovery_attempts(key_path["path"])  # Resetear tras éxito
             set_status("✔ Llave recuperada.", SUCCESS)
+            
+        except ValueError as e:
+            # Captura error de límite de intentos
+            log_security_error("recover_key_ratelimit", e)
+            messagebox.showerror("Acceso bloqueado", str(e), parent=win)
+            
         except HybridVaultAuthenticationError as e:
+            # Contraseña incorrecta - incrementar contador
+            increment_recovery_attempt(key_path["path"])
+            remaining_attempts = MAX_RECOVERY_ATTEMPTS - recover_attempts[key_path["path"]]["count"]
             log_security_error("recover_key_auth", e)
-            messagebox.showerror("Error", "No fue posible recuperar la llave.", parent=win)
+            
+            if remaining_attempts > 0:
+                messagebox.showerror(
+                    "Contraseña incorrecta", 
+                    f"Contraseña incorrecta. Te quedan {remaining_attempts} intentos.", 
+                    parent=win
+                )
+            else:
+                messagebox.showerror(
+                    "Acceso bloqueado",
+                    f"Demasiados intentos fallidos. Intenta nuevamente más tarde.",
+                    parent=win
+                )
+                
         except Exception as e:
+            increment_recovery_attempt(key_path["path"])
             log_security_error("recover_key_unexpected", e)
             messagebox.showerror("Error", "No fue posible recuperar la llave.", parent=win)
 
