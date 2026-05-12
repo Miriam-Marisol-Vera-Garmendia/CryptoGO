@@ -35,6 +35,7 @@ NONCE_SIZE_BYTES         = 12
 TAG_SIZE_BYTES           = 16
 ED25519_SIG_BYTES        = 64         # firma Ed25519 siempre tiene exactamente 64 bytes
 ED25519_PUB_BYTES        = 32         # clave pública Ed25519: 32 bytes
+MAX_FILE_SIZE            = 100 * 1024 * 1024  # 100 MB - límite máximo de tamaño de archivo
 
 # KDF (Scrypt) para protección local de llaves privadas ECIES
 KDF_SALT_BYTES        = 32
@@ -65,6 +66,9 @@ class HybridVaultSignatureError(HybridVaultError):
     o que la clave pública del firmante proporcionada no corresponde al firmante real.
     El descifrado NO se realiza cuando se lanza esta excepción.
     """
+
+class HybridVaultFileSizeError(HybridVaultError):
+    """Lanzada cuando el archivo a cifrar excede el tamaño máximo permitido."""
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -549,6 +553,14 @@ def encrypt_file_for_recipients(
         raise ValueError(
             f"La clave privada Ed25519 debe tener 32 bytes, "
             f"se recibieron {len(signing_private_key)}."
+        )
+
+    # ── Validación de tamaño de archivo ──────────────────────────────────────
+    file_size = input_path.stat().st_size
+    if file_size > MAX_FILE_SIZE:
+        raise HybridVaultFileSizeError(
+            f"Archivo demasiado grande: {file_size / (1024 * 1024):.2f}MB. "
+            f"Tamaño máximo permitido: {MAX_FILE_SIZE / (1024 * 1024):.0f}MB."
         )
 
     # ── 1. Leer plaintext ────────────────────────────────────────────────────

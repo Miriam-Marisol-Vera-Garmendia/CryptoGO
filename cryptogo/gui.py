@@ -15,6 +15,7 @@ from encryption.hybrid_vault import (
 )
 from encryption import (
     HybridVaultAuthenticationError,
+    HybridVaultFileSizeError,
     HybridVaultFormatError,
     HybridVaultSignatureError,
 )
@@ -681,6 +682,10 @@ def encrypt():
             f"Contenedor:\n{result}\n\n"
             f"Recipients: {', '.join(recipients.keys())}",
         )
+    except HybridVaultFileSizeError as e:
+        log_security_error("encrypt_file_size", e)
+        set_status("Archivo demasiado grande.", DANGER)
+        messagebox.showerror("Archivo demasiado grande", str(e))
     except FileExistsError as e:
         log_security_error("encrypt_output_exists", e)
         set_status("No se pudo completar la operación.", DANGER)
