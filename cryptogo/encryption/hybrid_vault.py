@@ -70,8 +70,10 @@ class HybridVaultSignatureError(HybridVaultError):
 class HybridVaultFileSizeError(HybridVaultError):
     """Lanzada cuando el archivo a cifrar excede el tamaño máximo permitido."""
 
+class HybridVaultRateLimitError(HybridVaultError):
+    """Lanzada cuando se excede el límite de intentos de operación sensible."""
 
-# ──────────────────────────────────────────────────────────────────────────────
+
 #  Utilidades internas
 # ──────────────────────────────────────────────────────────────────────────────
 
