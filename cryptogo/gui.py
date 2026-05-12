@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox, scrolledtext
 from datetime import datetime
 from pathlib import Path
 
+# pyrefly: ignore [missing-import]
 from encryption.hybrid_vault import (
     encrypt_file_for_recipients,
     decrypt_file_for_recipient,
@@ -81,7 +82,27 @@ TEAL       = "#0d9488"   # verde azulado — guardar protegida
 
 # Limitación de intentos de brute force en recuperación de contraseña (Fix KEYS-004)
 import time
-recover_attempts = {}  # {vkey_path: {"count": int, "locked_until": timestamp}}
+import json
+
+LOCKOUT_FILE = Path(__file__).parent / "lockout.json"
+
+def load_recover_attempts():
+    if LOCKOUT_FILE.exists():
+        try:
+            with open(LOCKOUT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_recover_attempts(attempts):
+    try:
+        with open(LOCKOUT_FILE, "w", encoding="utf-8") as f:
+            json.dump(attempts, f)
+    except Exception as e:
+        log_security_error("save_lockout", e)
+
+recover_attempts = load_recover_attempts()  # {vkey_path: {"count": int, "locked_until": timestamp}}
 MAX_RECOVERY_ATTEMPTS = 10
 RECOVERY_LOCKOUT_SECONDS = 300  # 5 minutos
 
@@ -92,10 +113,12 @@ def check_recovery_attempts(vkey_path: str) -> bool:
     """
     now = time.time()
     
-    if vkey_path not in recover_attempts:
-        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    attempts = load_recover_attempts()
     
-    attempt_data = recover_attempts[vkey_path]
+    if vkey_path not in attempts:
+        attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    
+    attempt_data = attempts[vkey_path]
     
     # Si está bloqueado, verificar si pasó el tiempo
     if attempt_data["locked_until"] > now:
@@ -105,26 +128,32 @@ def check_recovery_attempts(vkey_path: str) -> bool:
     
     # Si pasó el tiempo de bloqueo, resetear
     if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
-        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+        attempts[vkey_path] = {"count": 0, "locked_until": 0}
+        save_recover_attempts(attempts)
     
     return True
 
 def increment_recovery_attempt(vkey_path: str) -> None:
     """Incrementa contador de intentos fallidos."""
-    if vkey_path not in recover_attempts:
-        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    attempts = load_recover_attempts()
+    if vkey_path not in attempts:
+        attempts[vkey_path] = {"count": 0, "locked_until": 0}
     
-    attempt_data = recover_attempts[vkey_path]
+    attempt_data = attempts[vkey_path]
     attempt_data["count"] += 1
     
     # Si alcanza el máximo, bloquear por 5 minutos
     if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
         attempt_data["locked_until"] = time.time() + RECOVERY_LOCKOUT_SECONDS
+        
+    save_recover_attempts(attempts)
 
 def reset_recovery_attempts(vkey_path: str) -> None:
     """Resetea intentos tras recuperación exitosa."""
-    if vkey_path in recover_attempts:
-        recover_attempts[vkey_path] = {"count": 0, "locked_until": 0}
+    attempts = load_recover_attempts()
+    if vkey_path in attempts:
+        attempts[vkey_path] = {"count": 0, "locked_until": 0}
+        save_recover_attempts(attempts)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -533,7 +562,8 @@ def open_recover_key_window():
         except HybridVaultAuthenticationError as e:
             # Contraseña incorrecta - incrementar contador
             increment_recovery_attempt(key_path["path"])
-            remaining_attempts = MAX_RECOVERY_ATTEMPTS - recover_attempts[key_path["path"]]["count"]
+            current_attempts = load_recover_attempts().get(key_path["path"], {"count": 0})["count"]
+            remaining_attempts = MAX_RECOVERY_ATTEMPTS - current_attempts
             log_security_error("recover_key_auth", e)
             
             if remaining_attempts > 0:
