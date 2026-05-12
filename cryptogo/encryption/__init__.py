@@ -12,9 +12,7 @@ from .file_vault import (
 from .hybrid_vault import (
     HybridVaultAuthenticationError,
     HybridVaultError,
-    HybridVaultFileSizeError,
     HybridVaultFormatError,
-    HybridVaultRateLimitError,
     HybridVaultSignatureError,
     decrypt_file_for_recipient,
     encrypt_file_for_recipients,
@@ -38,9 +36,7 @@ __all__ = [
     # hybrid_vault
     "HybridVaultAuthenticationError",
     "HybridVaultError",
-    "HybridVaultFileSizeError",
     "HybridVaultFormatError",
-    "HybridVaultRateLimitError",
     "HybridVaultSignatureError",
     "decrypt_file_for_recipient",
     "encrypt_file_for_recipients",
