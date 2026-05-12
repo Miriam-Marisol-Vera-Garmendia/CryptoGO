@@ -3,22 +3,25 @@ from tkinter import filedialog, messagebox, scrolledtext
 from datetime import datetime
 from pathlib import Path
 
-# pyrefly: ignore [missing-import]
 from encryption.hybrid_vault import (
     encrypt_file_for_recipients,
     decrypt_file_for_recipient,
     generate_ecies_keypair,
     generate_signing_keypair,
-    protect_private_key,
-    recover_private_key,
     get_container_info,
     public_key_fingerprint,
 )
+from encryption.key_manager import (
+    protect_private_key,
+    recover_private_key,
+    KEY_TYPE_ECIES,
+    KEY_TYPE_ED25519,
+    KeyManagerAuthError,
+    KeyManagerFormatError,
+)
 from encryption import (
     HybridVaultAuthenticationError,
-    HybridVaultFileSizeError,
     HybridVaultFormatError,
-    HybridVaultRateLimitError,
     HybridVaultSignatureError,
 )
 import logging
@@ -79,81 +82,6 @@ ROSE       = "#db2777"   # rosa — copiar, secundarios
 VIOLET     = "#7c3aed"   # morado — generar, claves principales
 INDIGO     = "#4338ca"   # índigo — inspeccionar, recuperar
 TEAL       = "#0d9488"   # verde azulado — guardar protegida
-
-# Limitación de intentos de brute force en recuperación de contraseña (Fix KEYS-004)
-import time
-import json
-
-LOCKOUT_FILE = Path(__file__).parent / "lockout.json"
-
-def load_recover_attempts():
-    if LOCKOUT_FILE.exists():
-        try:
-            with open(LOCKOUT_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def save_recover_attempts(attempts):
-    try:
-        with open(LOCKOUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(attempts, f)
-    except Exception as e:
-        log_security_error("save_lockout", e)
-
-recover_attempts = load_recover_attempts()  # {vkey_path: {"count": int, "locked_until": timestamp}}
-MAX_RECOVERY_ATTEMPTS = 10
-RECOVERY_LOCKOUT_SECONDS = 300  # 5 minutos
-
-def check_recovery_attempts(vkey_path: str) -> bool:
-    """
-    Verifica si se pueden hacer más intentos de recuperación.
-    Lanza ValueError si está bloqueado por demasiados intentos fallidos.
-    """
-    now = time.time()
-    
-    attempts = load_recover_attempts()
-    
-    if vkey_path not in attempts:
-        attempts[vkey_path] = {"count": 0, "locked_until": 0}
-    
-    attempt_data = attempts[vkey_path]
-    
-    # Si está bloqueado, verificar si pasó el tiempo
-    if attempt_data["locked_until"] > now:
-        raise ValueError(
-            f"Acceso bloqueado. Intenta nuevamente más tarde."
-        )
-    
-    # Si pasó el tiempo de bloqueo, resetear
-    if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
-        attempts[vkey_path] = {"count": 0, "locked_until": 0}
-        save_recover_attempts(attempts)
-    
-    return True
-
-def increment_recovery_attempt(vkey_path: str) -> None:
-    """Incrementa contador de intentos fallidos."""
-    attempts = load_recover_attempts()
-    if vkey_path not in attempts:
-        attempts[vkey_path] = {"count": 0, "locked_until": 0}
-    
-    attempt_data = attempts[vkey_path]
-    attempt_data["count"] += 1
-    
-    # Si alcanza el máximo, bloquear por 5 minutos
-    if attempt_data["count"] >= MAX_RECOVERY_ATTEMPTS:
-        attempt_data["locked_until"] = time.time() + RECOVERY_LOCKOUT_SECONDS
-        
-    save_recover_attempts(attempts)
-
-def reset_recovery_attempts(vkey_path: str) -> None:
-    """Resetea intentos tras recuperación exitosa."""
-    attempts = load_recover_attempts()
-    if vkey_path in attempts:
-        attempts[vkey_path] = {"count": 0, "locked_until": 0}
-        save_recover_attempts(attempts)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -363,21 +291,29 @@ def open_keygen_window():
             if len(pw) < 8:
                 messagebox.showwarning("Débil", "Mínimo 8 caracteres.", parent=pw_win)
                 return
-            try:
-                protected = protect_private_key(priv_hex.get(), pw)
-            except Exception as e:
-                log_security_error("protect_key", e)
-                messagebox.showerror("Error", "No fue posible proteger la llave.", parent=pw_win); return
-            path = filedialog.asksaveasfilename(
-                parent=pw_win, title="Guardar .vkey",
-                defaultextension=".vkey",
-                filetypes=[("CryptoGO Key", "*.vkey"), ("Todos", "*.*")],
+            folder = filedialog.askdirectory(
+                parent=pw_win, title="Seleccionar carpeta donde guardar el keystore",
             )
-            if path:
-                Path(path).write_bytes(protected)
-                messagebox.showinfo("Guardado", f"Guardada en:\n{path}", parent=pw_win)
+            if not folder:
+                return
+            import os
+            keystore_path = os.path.join(folder, "keystore")
+            try:
+                protect_private_key(
+                    key_material=priv_hex.get(),
+                    key_type=KEY_TYPE_ECIES,
+                    password=pw,
+                    keystore_dir=keystore_path,
+                    label="clave-ecies",
+                )
+                messagebox.showinfo("Guardado", f"Keystore guardado en:\n{keystore_path}", parent=pw_win)
                 set_status("✔ Llave protegida guardada.", SUCCESS)
                 pw_win.destroy()
+            except FileExistsError:
+                messagebox.showerror("Error", "Ya existe un keystore en esa carpeta.\nElige otra ubicación.", parent=pw_win)
+            except Exception as e:
+                log_security_error("protect_key", e)
+                messagebox.showerror("Error", "No fue posible proteger la llave.", parent=pw_win)
 
         StyledButton(pw_win, "🔒 Cifrar y guardar", do_save, color=TEAL).pack()
 
@@ -503,7 +439,7 @@ def open_signing_keygen_window():
 
 def open_recover_key_window():
     win = tk.Toplevel(root)
-    win.title("Recuperar llave privada (.vkey)")
+    win.title("Recuperar llave privada (keystore)")
     win.geometry("580x260")
     win.configure(bg=BG)
     win.resizable(False, False)
@@ -515,22 +451,23 @@ def open_recover_key_window():
                      highlightthickness=1, highlightbackground=BORDER)
     frame.pack(fill="x", padx=18, pady=8)
 
-    file_var = tk.StringVar(value="Ningún archivo seleccionado")
-    tk.Label(frame, textvariable=file_var, bg=BG_PANEL, fg=TEXT_DIM,
+    folder_var = tk.StringVar(value="Ninguna carpeta seleccionada")
+    tk.Label(frame, textvariable=folder_var, bg=BG_PANEL, fg=TEXT_DIM,
              font=("Consolas", 8)).pack(anchor="w", pady=(0, 4))
 
-    key_path: dict = {"path": None}
+    key_path = {"path": None}
 
-    def pick_file():
-        p = filedialog.askopenfilename(
-            parent=win, title="Seleccionar .vkey",
-            filetypes=[("CryptoGO Key", "*.vkey"), ("Todos", "*.*")],
+    def pick_folder():                          # ← ahora busca CARPETA
+        p = filedialog.askdirectory(
+            parent=win, title="Seleccionar carpeta keystore",
         )
         if p:
-            key_path["path"] = p; file_var.set(Path(p).name)
+            key_path["path"] = p
+            folder_var.set(p)
 
-    StyledButton(frame, "Seleccionar archivo .vkey", pick_file,
+    StyledButton(frame, "Seleccionar carpeta keystore", pick_folder,
                  color=INDIGO).pack(anchor="w", pady=(0, 8))
+
     tk.Label(frame, text="Contraseña:", bg=BG_PANEL, fg=TEXT,
              font=("Segoe UI", 9)).pack(anchor="w")
     pw_entry = StyledEntry(frame, show_char="•", width=70)
@@ -543,44 +480,20 @@ def open_recover_key_window():
 
     def do_recover():
         if not key_path["path"]:
-            messagebox.showwarning("Sin archivo", "Selecciona un .vkey.", parent=win); return
-        
+            messagebox.showwarning("Sin carpeta", "Selecciona un keystore.", parent=win)
+            return
         try:
-            # Verificar límite de intentos (Fix KEYS-004)
-            check_recovery_attempts(key_path["path"])
-            
-            priv = recover_private_key(Path(key_path["path"]).read_bytes(), pw_entry.get())
-            result_var.set(priv)
-            reset_recovery_attempts(key_path["path"])  # Resetear tras éxito
+            recovered, key_type, info = recover_private_key(
+                keystore_dir=key_path["path"],
+                password=pw_entry.get(),
+            )
+            result_var.set(recovered)
             set_status("✔ Llave recuperada.", SUCCESS)
-            
-        except ValueError as e:
-            # Captura error de límite de intentos
-            log_security_error("recover_key_ratelimit", e)
-            messagebox.showerror("Acceso bloqueado", str(e), parent=win)
-            
-        except HybridVaultAuthenticationError as e:
-            # Contraseña incorrecta - incrementar contador
-            increment_recovery_attempt(key_path["path"])
-            current_attempts = load_recover_attempts().get(key_path["path"], {"count": 0})["count"]
-            remaining_attempts = MAX_RECOVERY_ATTEMPTS - current_attempts
-            log_security_error("recover_key_auth", e)
-            
-            if remaining_attempts > 0:
-                messagebox.showerror(
-                    "Contraseña incorrecta", 
-                    f"Contraseña incorrecta. Te quedan {remaining_attempts} intentos.", 
-                    parent=win
-                )
-            else:
-                messagebox.showerror(
-                    "Acceso bloqueado",
-                    f"Demasiados intentos fallidos. Intenta nuevamente más tarde.",
-                    parent=win
-                )
-                
+        except KeyManagerAuthError:
+            messagebox.showerror("Error", "Contraseña incorrecta.", parent=win)
+        except KeyManagerFormatError as e:
+            messagebox.showerror("Error", f"Keystore inválido:\n{e}", parent=win)
         except Exception as e:
-            increment_recovery_attempt(key_path["path"])
             log_security_error("recover_key_unexpected", e)
             messagebox.showerror("Error", "No fue posible recuperar la llave.", parent=win)
 
@@ -593,7 +506,6 @@ def open_recover_key_window():
     btn_row.pack(pady=6)
     StyledButton(btn_row, "🔓 Recuperar", do_recover,  color=VIOLET).pack(side="left", padx=4)
     StyledButton(btn_row, "📋 Copiar",    copy_result, color=ROSE).pack(side="left", padx=4)
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Ventana: Inspeccionar contenedor
@@ -788,10 +700,6 @@ def encrypt():
             f"Contenedor:\n{result}\n\n"
             f"Recipients: {', '.join(recipients.keys())}",
         )
-    except HybridVaultFileSizeError as e:
-        log_security_error("encrypt_file_size", e)
-        set_status("Archivo demasiado grande.", DANGER)
-        messagebox.showerror("Archivo demasiado grande", str(e))
     except FileExistsError as e:
         log_security_error("encrypt_output_exists", e)
         set_status("No se pudo completar la operación.", DANGER)
