@@ -5,10 +5,7 @@ import tempfile
 import pytest
 from pathlib import Path
 
-# Permite ejecutar desde la raíz del proyecto
-sys.path.insert(0, str(Path(__file__).parent))
-
-from encryption.hybrid_vault import (
+from cryptogo.encryption.hybrid_vault import (
     encrypt_file_for_recipients,
     decrypt_file_for_recipient,
     generate_ecies_keypair,
