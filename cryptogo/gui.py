@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, scrolledtext
 from datetime import datetime
 from pathlib import Path
 
-from encryption.hybrid_vault import (
+from cryptogo.encryption.hybrid_vault import (
     encrypt_file_for_recipients,
     decrypt_file_for_recipient,
     generate_ecies_keypair,
@@ -11,7 +11,7 @@ from encryption.hybrid_vault import (
     get_container_info,
     public_key_fingerprint,
 )
-from encryption.key_manager import (
+from cryptogo.encryption.key_manager import (
     protect_private_key,
     recover_private_key,
     KEY_TYPE_ECIES,
@@ -19,7 +19,7 @@ from encryption.key_manager import (
     KeyManagerAuthError,
     KeyManagerFormatError,
 )
-from encryption import (
+from cryptogo.encryption import (
     HybridVaultAuthenticationError,
     HybridVaultFormatError,
     HybridVaultSignatureError,
