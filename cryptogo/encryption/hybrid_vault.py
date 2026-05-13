@@ -43,6 +43,11 @@ KDF_R                 = 8
 KDF_P                 = 1
 ENCRYPTED_KEY_VERSION = 1
 
+GENERIC_FORMAT_ERROR = "El contenedor tiene un formato inválido o está corrupto."
+GENERIC_AUTH_ERROR = "Fallo de autenticación: clave incorrecta o contenedor manipulado."
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+ALLOWED_FILE_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps", ".txt"}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Excepciones

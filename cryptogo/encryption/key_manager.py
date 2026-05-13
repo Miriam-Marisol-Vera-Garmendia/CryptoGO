@@ -317,7 +317,7 @@ def rotate_key(
     Returns:
         (new_keystore_path, new_key_material)
     """
-    from encryption.hybrid_vault import generate_ecies_keypair, generate_signing_keypair
+    from cryptogo.encryption.hybrid_vault import generate_ecies_keypair, generate_signing_keypair
 
     # Recuperar clave antigua para determinar tipo
     _, key_type, old_metadata = recover_private_key(old_keystore_dir, old_password)
