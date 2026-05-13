@@ -22,9 +22,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from encryption.key_manager import (
+from cryptogo.encryption.key_manager import (
     KEY_TYPE_ECIES,
     KEY_TYPE_ED25519,
     KeyManagerAuthError,
@@ -35,7 +33,7 @@ from encryption.key_manager import (
     recover_private_key,
     rotate_key,
 )
-from encryption.hybrid_vault import (
+from cryptogo.encryption.hybrid_vault import (
     decrypt_file_for_recipient,
     encrypt_file_for_recipients,
     generate_ecies_keypair,
