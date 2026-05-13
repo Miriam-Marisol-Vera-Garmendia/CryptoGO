@@ -61,3 +61,13 @@ htmlcov/
 # ==============================
 
 *.log
+
+# ==============================
+# Application Data
+# ==============================
+
+contactos.json
+keystore/
+keystore_firma/
+*.cryptogo
+*.vkey

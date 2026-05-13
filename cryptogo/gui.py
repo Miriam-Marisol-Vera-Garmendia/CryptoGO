@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
 from datetime import datetime
 from pathlib import Path
+import json
+import os
 
 from cryptogo.encryption.hybrid_vault import (
     encrypt_file_for_recipients,
@@ -56,6 +58,31 @@ def log_security_error(context: str, exc: BaseException) -> None:
         exc,
         traceback.format_exc(),
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Agenda de Contactos (Directorio de Llaves Públicas)
+# ──────────────────────────────────────────────────────────────────────────────
+
+CONTACTS_FILE = Path(__file__).parent / "contactos.json"
+
+def load_contacts() -> dict[str, dict]:
+    if not CONTACTS_FILE.exists():
+        return {}
+    try:
+        with open(CONTACTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # Migrar formato antiguo (string simple) al nuevo (diccionario con dos llaves)
+            for k, v in data.items():
+                if isinstance(v, str):
+                    data[k] = {"access": v, "signing": ""}
+            return data
+    except Exception:
+        return {}
+
+def save_contacts(contacts: dict[str, str]):
+    with open(CONTACTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(contacts, f, indent=4, ensure_ascii=False)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -265,10 +292,18 @@ def open_keygen_window():
             copy_to_clipboard(pub_hex.get())
             messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
 
-    def copy_priv():
-        if priv_hex.get():
-            copy_to_clipboard(priv_hex.get())
-            messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
+    def save_pub():
+        if not pub_hex.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        pub_path = filedialog.asksaveasfilename(
+            parent=win, title="Guardar llave pública de acceso",
+            defaultextension=".txt",
+            filetypes=[("Texto hex", "*.txt"), ("Todos", "*.*")],
+        )
+        if pub_path:
+            Path(pub_path).write_text(pub_hex.get(), encoding="utf-8")
+            messagebox.showinfo("Guardado", f"Llave pública guardada en:\n{pub_path}", parent=win)
 
     def save_protected():
         if not priv_hex.get():
@@ -322,8 +357,8 @@ def open_keygen_window():
     StyledButton(btn_row, "⚡ Generar",          do_generate,    color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",       toggle_priv,    color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",    copy_pub,       color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "📋 Copiar privada",    copy_priv,      color=CHERRY).pack(side="left", padx=3)
-    StyledButton(btn_row, "🔒 Guardar protegida", save_protected, color=TEAL).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -400,13 +435,12 @@ def open_signing_keygen_window():
             copy_to_clipboard(priv_hex_var.get())
             messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
 
-    def save_keys():
-        """Guarda las claves en archivos de texto con el valor hex, igual a lo que se muestra en pantalla."""
+    def save_pub():
         if not pub_hex_var.get():
             messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
             return
         pub_path = filedialog.asksaveasfilename(
-            parent=win, title="Guardar llave pública",
+            parent=win, title="Guardar llave pública de firma",
             defaultextension=".txt",
             filetypes=[("Texto hex", "*.txt"), ("Todos", "*.*")],
         )
@@ -414,23 +448,62 @@ def open_signing_keygen_window():
             Path(pub_path).write_text(pub_hex_var.get(), encoding="utf-8")
             messagebox.showinfo("Guardado", f"Llave pública guardada en:\n{pub_path}", parent=win)
 
-        priv_path = filedialog.asksaveasfilename(
-            parent=win, title="Guardar llave privada",
-            defaultextension=".txt",
-            filetypes=[("Texto hex", "*.txt"), ("Todos", "*.*")],
-        )
-        if priv_path:
-            Path(priv_path).write_text(priv_hex_var.get(), encoding="utf-8")
-            messagebox.showinfo("Guardado", f"Llave privada guardada en:\n{priv_path}", parent=win)
-            set_status("✔ Llaves de firma guardadas.", SUCCESS)
+    def save_protected():
+        if not priv_hex_var.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        pw_win = tk.Toplevel(win)
+        pw_win.title("Proteger llave privada de firma")
+        pw_win.geometry("440x200")
+        pw_win.configure(bg=BG)
+        pw_win.resizable(False, False)
+        tk.Label(pw_win, text="Contraseña para proteger la llave privada de firma",
+                 bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(pady=(16, 4))
+        tk.Label(pw_win, text="Mínimo 8 caracteres.",
+                 bg=BG, fg=WARNING, font=("Segoe UI", 8)).pack()
+        pw_entry = StyledEntry(pw_win, show_char="•", width=52)
+        pw_entry.pack(pady=8)
+
+        def do_save():
+            pw = pw_entry.get()
+            if len(pw) < 8:
+                messagebox.showwarning("Débil", "Mínimo 8 caracteres.", parent=pw_win)
+                return
+            folder = filedialog.askdirectory(
+                parent=pw_win, title="Seleccionar carpeta donde guardar el keystore de firma",
+            )
+            if not folder:
+                return
+            import os
+            keystore_path = os.path.join(folder, "keystore_firma")
+            try:
+                # La llave de firma Ed25519 en key_manager espera los bytes crudos (raw)
+                raw_bytes = bytes.fromhex(priv_hex_var.get())
+                protect_private_key(
+                    key_material=raw_bytes,
+                    key_type=KEY_TYPE_ED25519,
+                    password=pw,
+                    keystore_dir=keystore_path,
+                    label="clave-firma-ed25519",
+                )
+                messagebox.showinfo("Guardado", f"Keystore de firma guardado en:\n{keystore_path}", parent=pw_win)
+                set_status("✔ Llave de firma protegida guardada.", SUCCESS)
+                pw_win.destroy()
+            except FileExistsError:
+                messagebox.showerror("Error", "Ya existe un keystore en esa carpeta.\nElige otra ubicación.", parent=pw_win)
+            except Exception as e:
+                log_security_error("protect_signing_key", e)
+                messagebox.showerror("Error", "No fue posible proteger la llave de firma.", parent=pw_win)
+
+        StyledButton(pw_win, "🔒 Cifrar y guardar privada", do_save, color=TEAL).pack()
 
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
     StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",     toggle_priv, color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",  copy_pub,    color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "📋 Copiar privada",  copy_priv,   color=CHERRY).pack(side="left", padx=3)
-    StyledButton(btn_row, "💾 Guardar en disco", save_keys,  color=TEAL).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -487,6 +560,8 @@ def open_recover_key_window():
                 keystore_dir=key_path["path"],
                 password=pw_entry.get(),
             )
+            if isinstance(recovered, bytes):
+                recovered = recovered.hex()
             result_var.set(recovered)
             set_status("✔ Llave recuperada.", SUCCESS)
         except KeyManagerAuthError:
@@ -559,6 +634,102 @@ def open_inspect_window():
 
     txt.insert("1.0", "\n".join(lines))
     txt.config(state="disabled")
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Ventana: Agenda de Contactos
+# ──────────────────────────────────────────────────────────────────────────────
+
+def open_contacts_window():
+    win = tk.Toplevel(root)
+    win.title("Agenda de Contactos")
+    win.geometry("540x480")
+    win.configure(bg=BG)
+    win.resizable(False, False)
+
+    tk.Label(win, text="Directorio de Llaves Públicas", bg=BG, fg=TEXT,
+             font=("Segoe UI", 12, "bold")).pack(pady=(14, 4))
+    tk.Label(win, text="Guarda aquí las llaves públicas de tus destinatarios.", bg=BG, fg=TEXT_DIM,
+             font=("Segoe UI", 9)).pack()
+
+    list_frame = tk.Frame(win, bg=BG)
+    list_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+    listbox = tk.Listbox(list_frame, font=("Segoe UI", 10), bg=BG_INPUT, fg=TEXT, relief="flat", highlightthickness=1, highlightbackground=BORDER)
+    listbox.pack(side="left", fill="both", expand=True)
+    scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+    scrollbar.pack(side="right", fill="y")
+    listbox.config(yscrollcommand=scrollbar.set)
+
+    def refresh_list():
+        listbox.delete(0, tk.END)
+        for name in load_contacts().keys():
+            listbox.insert(tk.END, name)
+            
+    refresh_list()
+
+    add_frame = tk.Frame(win, bg=BG_PANEL, highlightthickness=1, highlightbackground=BORDER, padx=14, pady=14)
+    add_frame.pack(fill="x", padx=20, pady=10)
+
+    tk.Label(add_frame, text="Nombre:", bg=BG_PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=0, column=0, sticky="e", pady=2)
+    name_entry = StyledEntry(add_frame, width=20)
+    name_entry.grid(row=0, column=1, sticky="w", padx=8, pady=2)
+
+    tk.Label(add_frame, text="Pública de Acceso:", bg=BG_PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="e", pady=2)
+    acc_key_entry = StyledEntry(add_frame, width=50)
+    acc_key_entry.grid(row=1, column=1, sticky="w", padx=8, pady=2)
+
+    tk.Label(add_frame, text="Pública de Firma:", bg=BG_PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=0, sticky="e", pady=2)
+    sign_key_entry = StyledEntry(add_frame, width=50)
+    sign_key_entry.grid(row=2, column=1, sticky="w", padx=8, pady=2)
+
+    def add_contact():
+        name = name_entry.get().strip()
+        acc_key = acc_key_entry.get().strip()
+        sign_key = sign_key_entry.get().strip()
+        if not name or (not acc_key and not sign_key):
+            messagebox.showwarning("Error", "Debes ingresar un nombre y al menos una llave.", parent=win)
+            return
+        c = load_contacts()
+        c[name] = {"access": acc_key, "signing": sign_key}
+        save_contacts(c)
+        name_entry.delete(0, tk.END)
+        acc_key_entry.delete(0, tk.END)
+        sign_key_entry.delete(0, tk.END)
+        refresh_list()
+        set_status(f"Contacto '{name}' guardado.", SUCCESS)
+
+    def delete_contact():
+        sel = listbox.curselection()
+        if not sel: return
+        name = listbox.get(sel[0])
+        c = load_contacts()
+        if name in c:
+            del c[name]
+            save_contacts(c)
+            refresh_list()
+            set_status(f"Contacto '{name}' eliminado.", WARNING)
+
+    def copy_key():
+        sel = listbox.curselection()
+        if not sel: return
+        name = listbox.get(sel[0])
+        c = load_contacts()
+        if name in c:
+            acc = c[name].get("access", "")
+            if acc:
+                copy_to_clipboard(acc)
+                messagebox.showinfo("Copiado", f"Llave pública de acceso de '{name}' copiada.", parent=win)
+            else:
+                messagebox.showinfo("Vacío", f"'{name}' no tiene llave de acceso.", parent=win)
+
+    btn_f = tk.Frame(add_frame, bg=BG_PANEL)
+    btn_f.grid(row=3, column=0, columnspan=2, pady=(10,0))
+    StyledButton(btn_f, "➕ Añadir a la agenda", add_contact, color=TEAL).pack()
+    
+    btn_f2 = tk.Frame(win, bg=BG)
+    btn_f2.pack(pady=5)
+    StyledButton(btn_f2, "📋 Copiar llave seleccionada", copy_key, color=INDIGO).pack(side="left", padx=5)
+    StyledButton(btn_f2, "🗑️ Eliminar seleccionado", delete_contact, color=DANGER).pack(side="left", padx=5)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -872,10 +1043,10 @@ StyledButton(tools_frame, "🔑 Llaves de acceso",
              open_keygen_window, color=VIOLET).pack(side="left", padx=3)
 StyledButton(tools_frame, "✍️ Llaves de firma",
              open_signing_keygen_window, color=CHERRY).pack(side="left", padx=3)
-StyledButton(tools_frame, "🔓 Recuperar .vkey",
+StyledButton(tools_frame, "🔓 Recuperar llave de acceso privada",
              open_recover_key_window, color=INDIGO).pack(side="left", padx=3)
-StyledButton(tools_frame, "🔍 Inspeccionar",
-             open_inspect_window, color=INDIGO).pack(side="left", padx=3)
+StyledButton(tools_frame, "👥 Agenda",
+             open_contacts_window, color=TEAL).pack(side="left", padx=3)
 
 hsep(_root)
 
@@ -913,10 +1084,41 @@ add_recipient_row("Recipient 1")
 
 btn_enc = tk.Frame(enc_body, bg=BG_PANEL)
 btn_enc.pack(pady=6)
-StyledButton(btn_enc, "+ Agregar recipient", add_recipient_row,
+
+def add_from_agenda():
+    contacts = load_contacts()
+    if not contacts:
+        messagebox.showinfo("Agenda vacía", "No tienes contactos. Ve a Herramientas -> 'Agenda' para añadir a tus destinatarios.")
+        return
+    
+    win = tk.Toplevel(root)
+    win.title("Seleccionar Contacto")
+    win.geometry("300x400")
+    win.configure(bg=BG)
+
+    tk.Label(win, text="Selecciona un destinatario:", bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(pady=10)
+
+    listbox = tk.Listbox(win, font=("Segoe UI", 10), bg=BG_INPUT, fg=TEXT, relief="flat", highlightthickness=1, highlightbackground=BORDER)
+    listbox.pack(fill="both", expand=True, padx=20, pady=5)
+    
+    for name in contacts.keys():
+        listbox.insert(tk.END, name)
+        
+    def on_select():
+        sel = listbox.curselection()
+        if sel:
+            name = listbox.get(sel[0])
+            add_recipient_row(name, contacts[name].get("access", ""))
+            win.destroy()
+
+    StyledButton(win, "➕ Añadir como Recipient", on_select, color=INDIGO).pack(pady=10)
+
+StyledButton(btn_enc, "+ Agregar recipient manual", add_recipient_row,
              color=INDIGO).pack(side="left", padx=4)
+StyledButton(btn_enc, "📘 Cargar de Agenda", add_from_agenda,
+             color=TEAL).pack(side="left", padx=4)
 StyledButton(btn_enc, "🔐 Cifrar y firmar", encrypt,
-             color=CHERRY).pack(side="left", padx=4)
+             color=CHERRY).pack(side="left", padx=14)
 
 hsep(_root)
 
@@ -933,8 +1135,41 @@ entry_dec_pub.pack(fill="x", pady=(2, 8))
 
 lbl(dec_body, "Llave pública de firma del remitente — obligatoria:",
     bold=True, color=WARNING).pack(anchor="w")
-entry_dec_signing_pub = StyledEntry(dec_body, width=82)
-entry_dec_signing_pub.pack(fill="x", pady=(2, 8))
+
+sign_row = tk.Frame(dec_body, bg=BG_PANEL)
+sign_row.pack(fill="x", pady=(2, 8))
+entry_dec_signing_pub = StyledEntry(sign_row, width=65)
+entry_dec_signing_pub.pack(side="left")
+
+def load_sender_from_agenda():
+    contacts = load_contacts()
+    if not contacts:
+        messagebox.showinfo("Agenda vacía", "No tienes contactos.")
+        return
+    win = tk.Toplevel(root)
+    win.title("Seleccionar Remitente")
+    win.geometry("300x400")
+    win.configure(bg=BG)
+    tk.Label(win, text="Selecciona el remitente:", bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).pack(pady=10)
+    listbox = tk.Listbox(win, font=("Segoe UI", 10), bg=BG_INPUT, fg=TEXT, relief="flat", highlightthickness=1, highlightbackground=BORDER)
+    listbox.pack(fill="both", expand=True, padx=20, pady=5)
+    for name in contacts.keys():
+        listbox.insert(tk.END, name)
+    def on_select():
+        sel = listbox.curselection()
+        if sel:
+            name = listbox.get(sel[0])
+            signing_key = contacts[name].get("signing", "")
+            if not signing_key:
+                messagebox.showwarning("Aviso", f"No tienes guardada la llave de firma de {name}.", parent=win)
+                return
+            entry_dec_signing_pub.config(state="normal")
+            entry_dec_signing_pub.delete(0, tk.END)
+            entry_dec_signing_pub.insert(0, signing_key)
+            win.destroy()
+    StyledButton(win, "📥 Cargar Llave de Firma", on_select, color=INDIGO).pack(pady=10)
+
+StyledButton(sign_row, "📘 Cargar de Agenda", load_sender_from_agenda, color=TEAL).pack(side="left", padx=10)
 
 btn_dec = tk.Frame(dec_body, bg=BG_PANEL)
 btn_dec.pack(pady=4)
