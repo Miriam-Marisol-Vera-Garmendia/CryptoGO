@@ -762,6 +762,103 @@ def add_recipient_row(name_default="", key_default=""):
     key_entry.insert(0, key_default)
     key_entry.pack(side="left", padx=(2, 4))
 
+    def save_to_agenda(ne=name_entry, ke=key_entry):
+        n = ne.get().strip()
+        k = ke.get().strip()
+        if not n or not k:
+            messagebox.showwarning(
+                "Datos incompletos",
+                "Ingresa nombre y llave pública de acceso antes de guardar.",
+            )
+            return
+
+        # Mini-diálogo para completar la llave de firma
+        dlg = tk.Toplevel(root)
+        dlg.title("Guardar en Agenda")
+        dlg.geometry("520x260")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+
+        tk.Label(dlg, text="Guardar contacto en la agenda", bg=BG, fg=TEXT,
+                 font=("Segoe UI", 11, "bold")).pack(pady=(14, 4))
+
+        form = tk.Frame(dlg, bg=BG_PANEL, padx=14, pady=12,
+                        highlightthickness=1, highlightbackground=BORDER)
+        form.pack(fill="x", padx=18, pady=6)
+
+        tk.Label(form, text="Nombre:", bg=BG_PANEL, fg=TEXT,
+                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="e", pady=3)
+        dlg_name = StyledEntry(form, width=40)
+        dlg_name.insert(0, n)
+        dlg_name.grid(row=0, column=1, sticky="w", padx=8, pady=3)
+
+        tk.Label(form, text="Pública de Acceso:", bg=BG_PANEL, fg=TEXT,
+                 font=("Segoe UI", 9)).grid(row=1, column=0, sticky="e", pady=3)
+        dlg_access = StyledEntry(form, width=40)
+        dlg_access.insert(0, k)
+        dlg_access.grid(row=1, column=1, sticky="w", padx=8, pady=3)
+
+        tk.Label(form, text="Pública de Firma:", bg=BG_PANEL, fg=TEXT,
+                 font=("Segoe UI", 9)).grid(row=2, column=0, sticky="e", pady=3)
+        dlg_signing = StyledEntry(form, width=40)
+        dlg_signing.grid(row=2, column=1, sticky="w", padx=8, pady=3)
+
+        # Pre-llenar la llave de firma si el contacto ya existe
+        existing = load_contacts()
+        if n in existing and existing[n].get("signing"):
+            dlg_signing.insert(0, existing[n]["signing"])
+
+        def _validate_hex_key(value, expected_bytes, label):
+            """Valida que un valor sea hexadecimal con la longitud correcta."""
+            try:
+                raw = bytes.fromhex(value)
+            except ValueError:
+                messagebox.showerror("Llave inválida",
+                    f"La {label} no tiene formato hexadecimal válido.",
+                    parent=dlg)
+                return False
+            if len(raw) != expected_bytes:
+                messagebox.showerror("Llave inválida",
+                    f"La {label} tiene {len(raw)} bytes, se esperan {expected_bytes}.\n"
+                    "Verifica que sea una llave completa y correcta.",
+                    parent=dlg)
+                return False
+            return True
+
+        def do_save():
+            name = dlg_name.get().strip()
+            acc  = dlg_access.get().strip()
+            sign = dlg_signing.get().strip()
+            if not name or not acc or not sign:
+                messagebox.showwarning("Datos incompletos",
+                    "Todos los campos son obligatorios:\n"
+                    "• Nombre\n• Llave pública de acceso\n• Llave pública de firma",
+                    parent=dlg)
+                return
+            # Validar formato y longitud de ambas llaves
+            if not _validate_hex_key(acc, 65, "llave pública de acceso"):
+                return
+            if not _validate_hex_key(sign, 32, "llave pública de firma"):
+                return
+            c = load_contacts()
+            if name in c:
+                if not messagebox.askyesno("Contacto existente",
+                    f"'{name}' ya existe.\n¿Deseas actualizar sus llaves?",
+                    parent=dlg):
+                    return
+            c[name] = {"access": acc, "signing": sign}
+            save_contacts(c)
+            set_status(f"✔ '{name}' guardado en la agenda.", SUCCESS)
+            dlg.destroy()
+
+        StyledButton(dlg, "💾 Guardar en Agenda", do_save, color=TEAL).pack(pady=10)
+
+    save_btn = tk.Button(frame, text="💾", bg=SUCCESS, fg="white",
+                         font=("Segoe UI", 8, "bold"), relief="flat",
+                         cursor="hand2", width=2, padx=4,
+                         command=save_to_agenda)
+    save_btn.pack(side="left", padx=(4, 2))
+
     rm_btn = tk.Button(frame, text="✕", bg=DANGER, fg="white",
                        font=("Segoe UI", 8, "bold"), relief="flat",
                        cursor="hand2", width=2, padx=4)
