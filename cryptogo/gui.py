@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 import os
+import time
 
 from cryptogo.encryption.hybrid_vault import (
     encrypt_file_for_recipients,
@@ -65,6 +66,23 @@ def log_security_error(context: str, exc: BaseException) -> None:
 # ──────────────────────────────────────────────────────────────────────────────
 
 CONTACTS_FILE = Path(__file__).parent / "contactos.json"
+LOCKOUT_FILE = Path(__file__).parent / "lockout.json"
+
+def load_lockout() -> dict:
+    if not LOCKOUT_FILE.exists():
+        return {"attempts": 0, "lockout_until": 0}
+    try:
+        with open(LOCKOUT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"attempts": 0, "lockout_until": 0}
+
+def save_lockout(data: dict):
+    try:
+        with open(LOCKOUT_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        log_security_error("save_lockout", e)
 
 def load_contacts() -> dict[str, dict]:
     if not CONTACTS_FILE.exists():
@@ -593,6 +611,16 @@ def open_recover_key_window():
              highlightthickness=1, highlightbackground=BORDER).pack(fill="x")
 
     def do_recover():
+        lockout_data = load_lockout()
+        current_time = time.time()
+        
+        if current_time < lockout_data.get("lockout_until", 0):
+            messagebox.showerror("Bloqueado", "Demasiados intentos fallidos. Inténtalo más tarde.", parent=win)
+            return
+
+        if lockout_data.get("attempts", 0) >= 10 and current_time >= lockout_data.get("lockout_until", 0):
+            lockout_data["attempts"] = 0
+
         if not key_path["path"]:
             messagebox.showwarning("Sin carpeta", "Selecciona un keystore.", parent=win)
             return
@@ -605,8 +633,16 @@ def open_recover_key_window():
                 recovered = recovered.hex()
             result_var.set(recovered)
             set_status("✔ Llave recuperada.", SUCCESS)
+            save_lockout({"attempts": 0, "lockout_until": 0})
         except KeyManagerAuthError:
-            messagebox.showerror("Error", "Contraseña incorrecta.", parent=win)
+            attempts = lockout_data.get("attempts", 0) + 1
+            if attempts >= 10:
+                lockout_until = current_time + 300  # 5 minutos
+                save_lockout({"attempts": attempts, "lockout_until": lockout_until})
+                messagebox.showerror("Bloqueado", "Demasiados intentos fallidos. Inténtalo más tarde.", parent=win)
+            else:
+                save_lockout({"attempts": attempts, "lockout_until": 0})
+                messagebox.showerror("Error", "Contraseña incorrecta.", parent=win)
         except KeyManagerFormatError as e:
             messagebox.showerror("Error", f"Keystore inválido:\n{e}", parent=win)
         except Exception as e:
