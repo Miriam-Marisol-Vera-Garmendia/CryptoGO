@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cryptogo"
-version = "1.6"
+version = "1.7"
 description = "Secure file encryption module using ChaCha20-Poly1305"
 
 readme = "README.md"
