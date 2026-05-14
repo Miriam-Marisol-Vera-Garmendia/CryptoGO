@@ -193,6 +193,30 @@ selected_file: str | None = None
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
 _remove_buttons: dict = {}
 
+# Referencias singleton para ventanas que sólo deben existir una a la vez
+_win_signing_keygen:  tk.Toplevel | None = None
+_win_recover_key:     tk.Toplevel | None = None
+_win_contacts:        tk.Toplevel | None = None
+_win_agenda_enc:      tk.Toplevel | None = None
+_win_agenda_dec:      tk.Toplevel | None = None
+_win_save_contact:    dict = {}   # singleton por fila: {id(name_entry): Toplevel}
+
+
+def _raise_or_create(ref_name: str, create_fn):
+    """Si la ventana ya existe y sigue abierta, la trae al frente; si no, la crea."""
+    import sys
+    win = globals().get(ref_name)
+    if win is not None:
+        try:
+            win.winfo_exists()  # lanza TclError si ya fue destruida
+            win.deiconify()
+            win.lift()
+            win.focus_force()
+            return
+        except tk.TclError:
+            pass  # La ventana fue cerrada; crear una nueva
+    create_fn()
+
 # Tipos de archivo permitidos para cifrado
 ALLOWED_FILE_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps"}
 ALLOWED_FILETYPES = [
@@ -384,7 +408,9 @@ def open_signing_keygen_window():
     Las claves se representan como hexadecimal para facilitar su copia y uso en la GUI.
     Internamente el módulo opera con bytes raw (32B privada, 32B pública).
     """
+    global _win_signing_keygen
     win = tk.Toplevel(root)
+    _win_signing_keygen = win
     win.title("Generar llaves de firma")
     win.geometry("700x400")
     win.resizable(False, False)
@@ -524,7 +550,9 @@ def open_signing_keygen_window():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_recover_key_window():
+    global _win_recover_key
     win = tk.Toplevel(root)
+    _win_recover_key = win
     win.title("Recuperar llave privada (keystore)")
     win.geometry("580x260")
     win.configure(bg=BG)
@@ -653,7 +681,9 @@ def open_inspect_window():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_contacts_window():
+    global _win_contacts
     win = tk.Toplevel(root)
+    _win_contacts = win
     win.title("Agenda de Contactos")
     win.geometry("540x480")
     win.configure(bg=BG)
@@ -820,8 +850,23 @@ def add_recipient_row(name_default="", key_default=""):
                     set_status(f"✔ Llave de acceso de '{n}' actualizada.", SUCCESS)
             return
 
+        # Singleton: si ya hay un diálogo abierto para esta fila, traerlo al frente
+        row_id = id(ne)
+        existing_dlg = _win_save_contact.get(row_id)
+        if existing_dlg is not None:
+            try:
+                existing_dlg.winfo_exists()
+                existing_dlg.deiconify()
+                existing_dlg.lift()
+                existing_dlg.focus_force()
+                return
+            except tk.TclError:
+                pass  # fue cerrado; crear uno nuevo
+
         # Contacto nuevo: abrir diálogo para pedir la llave de firma
         dlg = tk.Toplevel(root)
+        _win_save_contact[row_id] = dlg
+        dlg.protocol("WM_DELETE_WINDOW", lambda: (_win_save_contact.pop(row_id, None), dlg.destroy()))
         dlg.title("Guardar en Agenda")
         dlg.geometry("520x260")
         dlg.configure(bg=BG)
@@ -851,18 +896,19 @@ def add_recipient_row(name_default="", key_default=""):
         dlg_signing = StyledEntry(form, width=40)
         dlg_signing.grid(row=2, column=1, sticky="w", padx=8, pady=3)
 
-        def _validate_hex_key(value, expected_bytes, label):
-            """Valida que un valor sea hexadecimal con la longitud correcta."""
+        def _validate_key(value, expected_bytes, label):
+            """Valida el formato y longitud de la llave sin revelar detalles internos."""
             try:
                 raw = bytes.fromhex(value)
             except ValueError:
                 messagebox.showerror("Llave inválida",
-                    f"La {label} no tiene formato hexadecimal válido.",
+                    f"La {label} ingresada no es válida.\n"
+                    "Verifica que sea una llave correcta y completa.",
                     parent=dlg)
                 return False
             if len(raw) != expected_bytes:
                 messagebox.showerror("Llave inválida",
-                    f"La {label} no tiene la longitud correcta.\n"
+                    f"La {label} ingresada no tiene la longitud correcta.\n"
                     "Verifica que sea una llave completa y correcta.",
                     parent=dlg)
                 return False
@@ -878,13 +924,11 @@ def add_recipient_row(name_default="", key_default=""):
                     "• Nombre\n• Llave pública de acceso\n• Llave pública de firma",
                     parent=dlg)
                 return
-            # Validar formato y longitud de ambas llaves
-            if not _validate_hex_key(acc, 65, "llave pública de acceso"):
+            if not _validate_key(acc, 65, "llave pública de acceso"):
                 return
-            if not _validate_hex_key(sign, 32, "llave pública de firma"):
+            if not _validate_key(sign, 32, "llave pública de firma"):
                 return
             c = load_contacts()
-            # Verificar que la llave de acceso no pertenezca a otro contacto
             dup = find_duplicate_access_key(c, acc, exclude_name=name)
             if dup:
                 messagebox.showerror("Llave duplicada",
@@ -895,6 +939,7 @@ def add_recipient_row(name_default="", key_default=""):
             c[name] = {"access": acc, "signing": sign}
             save_contacts(c)
             set_status(f"✔ '{name}' guardado en la agenda.", SUCCESS)
+            _win_save_contact.pop(row_id, None)
             dlg.destroy()
 
         StyledButton(dlg, "💾 Guardar en Agenda", do_save, color=TEAL).pack(pady=10)
@@ -1185,11 +1230,14 @@ tools_frame.pack(fill="x", padx=14, pady=2)
 StyledButton(tools_frame, "🔑 Llaves de acceso",
              open_keygen_window, color=VIOLET).pack(side="left", padx=3)
 StyledButton(tools_frame, "✍️ Llaves de firma",
-             open_signing_keygen_window, color=CHERRY).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_signing_keygen", open_signing_keygen_window),
+             color=CHERRY).pack(side="left", padx=3)
 StyledButton(tools_frame, "🔓 Recuperar llave de acceso privada",
-             open_recover_key_window, color=INDIGO).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_recover_key", open_recover_key_window),
+             color=INDIGO).pack(side="left", padx=3)
 StyledButton(tools_frame, "👥 Agenda",
-             open_contacts_window, color=TEAL).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_contacts", open_contacts_window),
+             color=TEAL).pack(side="left", padx=3)
 
 hsep(_root)
 
@@ -1252,12 +1300,25 @@ btn_enc = tk.Frame(enc_body, bg=BG_PANEL)
 btn_enc.pack(pady=6)
 
 def add_from_agenda():
+    global _win_agenda_enc
     contacts = load_contacts()
     if not contacts:
         messagebox.showinfo("Agenda vacía", "No tienes contactos. Ve a Herramientas -> 'Agenda' para añadir a tus destinatarios.")
         return
-    
+
+    # Si ya hay una ventana abierta, traerla al frente
+    if _win_agenda_enc is not None:
+        try:
+            _win_agenda_enc.winfo_exists()
+            _win_agenda_enc.deiconify()
+            _win_agenda_enc.lift()
+            _win_agenda_enc.focus_force()
+            return
+        except tk.TclError:
+            pass
+
     win = tk.Toplevel(root)
+    _win_agenda_enc = win
     win.title("Seleccionar Contacto")
     win.geometry("300x400")
     win.configure(bg=BG)
@@ -1308,11 +1369,25 @@ entry_dec_signing_pub = StyledEntry(sign_row, width=65)
 entry_dec_signing_pub.pack(side="left")
 
 def load_sender_from_agenda():
+    global _win_agenda_dec
     contacts = load_contacts()
     if not contacts:
         messagebox.showinfo("Agenda vacía", "No tienes contactos.")
         return
+
+    # Si ya hay una ventana abierta, traerla al frente
+    if _win_agenda_dec is not None:
+        try:
+            _win_agenda_dec.winfo_exists()
+            _win_agenda_dec.deiconify()
+            _win_agenda_dec.lift()
+            _win_agenda_dec.focus_force()
+            return
+        except tk.TclError:
+            pass
+
     win = tk.Toplevel(root)
+    _win_agenda_dec = win
     win.title("Seleccionar Remitente")
     win.geometry("300x400")
     win.configure(bg=BG)
