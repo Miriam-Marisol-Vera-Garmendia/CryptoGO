@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
 from pathlib import Path
 import json
@@ -1132,14 +1132,14 @@ root = tk.Tk()
 root.title("CryptoGO")
 root.configure(bg=BG)
 
-# Tamaño inicial: 90% de la pantalla disponible, máximo 800x900
+# Tamaño inicial optimizado para el diseño de pestañas
 _sw = root.winfo_screenwidth()
 _sh = root.winfo_screenheight()
-_w  = min(800, int(_sw * 0.90))
-_h  = min(900, int(_sh * 0.90))
+_w  = min(820, int(_sw * 0.90))
+_h  = min(650, int(_sh * 0.90))  # Altura inicial más compacta
 root.geometry(f"{_w}x{_h}")
 root.resizable(True, True)
-root.minsize(700, 500)
+root.minsize(720, 500)
 
 # ── Canvas + Scrollbar para scroll vertical ───────────────────────────────────
 _canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
@@ -1193,8 +1193,31 @@ StyledButton(tools_frame, "👥 Agenda",
 
 hsep(_root)
 
-# ── Sección: Cifrar ───────────────────────────────────────────────────────────
-enc_body = make_section(_root, "📦  CIFRAR Y FIRMAR ARCHIVO")
+# ── Pestañas Personalizadas (Diseño Plano y Moderno) ──────────────────────────
+tab_container = tk.Frame(_root, bg=BG)
+tab_container.pack(fill="both", expand=True, padx=14, pady=(4, 6))
+
+tab_bar = tk.Frame(tab_container, bg=BG)
+tab_bar.pack(fill="x", pady=(0, 2))
+
+# Botones de las pestañas
+btn_enc_tab = tk.Button(tab_bar, text=" \U0001f4e6 Cifrar y Firmar ", font=("Segoe UI", 9, "bold"),
+                        relief="flat", bg=VIOLET, fg="white", activebackground=_darken(VIOLET), 
+                        activeforeground="white", cursor="hand2", padx=12, pady=4)
+btn_enc_tab.pack(side="left", padx=(0, 2))
+
+btn_dec_tab = tk.Button(tab_bar, text=" \U0001f513 Descifrar y Verificar ", font=("Segoe UI", 9, "bold"),
+                        relief="flat", bg=BG_PANEL, fg=TEXT, activebackground=BORDER,
+                        cursor="hand2", padx=12, pady=4)
+btn_dec_tab.pack(side="left")
+
+# Contenedor principal de los paneles
+content_area = tk.Frame(tab_container, bg=BG_PANEL, highlightthickness=1, highlightbackground=BORDER)
+content_area.pack(fill="both", expand=True)
+
+# ── Pestaña 1: Cifrar y Firmar ────────────────────────────────────────────────
+tab_enc = tk.Frame(content_area, bg=BG_PANEL, padx=14, pady=12)
+enc_body = tab_enc  # alias para no cambiar el resto del código de cifrado
 
 row_file = tk.Frame(enc_body, bg=BG_PANEL)
 row_file.pack(fill="x", pady=2)
@@ -1263,10 +1286,10 @@ StyledButton(btn_enc, "📘 Cargar de Agenda", add_from_agenda,
 StyledButton(btn_enc, "🔐 Cifrar y firmar", encrypt,
              color=CHERRY).pack(side="left", padx=14)
 
-hsep(_root)
+# ── Pestaña 2: Descifrar y Verificar ─────────────────────────────────────────
+tab_dec = tk.Frame(content_area, bg=BG_PANEL, padx=14, pady=12)
 
-# ── Sección: Descifrar ────────────────────────────────────────────────────────
-dec_body = make_section(_root, "🔓  DESCIFRAR Y VERIFICAR FIRMA")
+dec_body = tab_dec  # alias para no cambiar el resto del código de descifrado
 
 lbl(dec_body, "Tu llave privada de acceso:", bold=True, color=DANGER).pack(anchor="w")
 entry_dec_priv = StyledEntry(dec_body, show_char="•", width=82)
@@ -1318,7 +1341,26 @@ btn_dec = tk.Frame(dec_body, bg=BG_PANEL)
 btn_dec.pack(pady=4)
 StyledButton(btn_dec, "🔓 Verificar firma y descifrar", decrypt, color=VIOLET).pack()
 
+# Lógica de cambio de pestañas
+def show_tab(tab_name):
+    if tab_name == "enc":
+        tab_dec.pack_forget()
+        tab_enc.pack(fill="both", expand=True)
+        btn_enc_tab.config(bg=VIOLET, fg="white")
+        btn_dec_tab.config(bg=BG_PANEL, fg=TEXT)
+    else:
+        tab_enc.pack_forget()
+        tab_dec.pack(fill="both", expand=True)
+        btn_dec_tab.config(bg=VIOLET, fg="white")
+        btn_enc_tab.config(bg=BG_PANEL, fg=TEXT)
+
+btn_enc_tab.config(command=lambda: show_tab("enc"))
+btn_dec_tab.config(command=lambda: show_tab("dec"))
+
+show_tab("enc")  # Mostrar la primera pestaña por defecto
+
 hsep(_root)
+
 
 # ── Barra de estado ───────────────────────────────────────────────────────────
 status_bar = tk.Frame(_root, bg=BG_PANEL, pady=5, padx=14,
