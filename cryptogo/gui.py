@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
 from pathlib import Path
 import json
@@ -193,6 +193,30 @@ selected_file: str | None = None
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
 _remove_buttons: dict = {}
 
+# Referencias singleton para ventanas que sólo deben existir una a la vez
+_win_signing_keygen:  tk.Toplevel | None = None
+_win_recover_key:     tk.Toplevel | None = None
+_win_contacts:        tk.Toplevel | None = None
+_win_agenda_enc:      tk.Toplevel | None = None
+_win_agenda_dec:      tk.Toplevel | None = None
+_win_save_contact:    dict = {}   # singleton por fila: {id(name_entry): Toplevel}
+
+
+def _raise_or_create(ref_name: str, create_fn):
+    """Si la ventana ya existe y sigue abierta, la trae al frente; si no, la crea."""
+    import sys
+    win = globals().get(ref_name)
+    if win is not None:
+        try:
+            win.winfo_exists()  # lanza TclError si ya fue destruida
+            win.deiconify()
+            win.lift()
+            win.focus_force()
+            return
+        except tk.TclError:
+            pass  # La ventana fue cerrada; crear una nueva
+    create_fn()
+
 # Tipos de archivo permitidos para cifrado
 ALLOWED_FILE_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps"}
 ALLOWED_FILETYPES = [
@@ -370,7 +394,7 @@ def open_keygen_window():
     StyledButton(btn_row, "⚡ Generar",          do_generate,    color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",       toggle_priv,    color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",    copy_pub,       color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
@@ -384,7 +408,9 @@ def open_signing_keygen_window():
     Las claves se representan como hexadecimal para facilitar su copia y uso en la GUI.
     Internamente el módulo opera con bytes raw (32B privada, 32B pública).
     """
+    global _win_signing_keygen
     win = tk.Toplevel(root)
+    _win_signing_keygen = win
     win.title("Generar llaves de firma")
     win.geometry("700x400")
     win.resizable(False, False)
@@ -515,7 +541,7 @@ def open_signing_keygen_window():
     StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",     toggle_priv, color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",  copy_pub,    color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
@@ -524,7 +550,9 @@ def open_signing_keygen_window():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_recover_key_window():
+    global _win_recover_key
     win = tk.Toplevel(root)
+    _win_recover_key = win
     win.title("Recuperar llave privada (keystore)")
     win.geometry("580x260")
     win.configure(bg=BG)
@@ -653,7 +681,9 @@ def open_inspect_window():
 # ──────────────────────────────────────────────────────────────────────────────
 
 def open_contacts_window():
+    global _win_contacts
     win = tk.Toplevel(root)
+    _win_contacts = win
     win.title("Agenda de Contactos")
     win.geometry("540x480")
     win.configure(bg=BG)
@@ -820,8 +850,23 @@ def add_recipient_row(name_default="", key_default=""):
                     set_status(f"✔ Llave de acceso de '{n}' actualizada.", SUCCESS)
             return
 
+        # Singleton: si ya hay un diálogo abierto para esta fila, traerlo al frente
+        row_id = id(ne)
+        existing_dlg = _win_save_contact.get(row_id)
+        if existing_dlg is not None:
+            try:
+                existing_dlg.winfo_exists()
+                existing_dlg.deiconify()
+                existing_dlg.lift()
+                existing_dlg.focus_force()
+                return
+            except tk.TclError:
+                pass  # fue cerrado; crear uno nuevo
+
         # Contacto nuevo: abrir diálogo para pedir la llave de firma
         dlg = tk.Toplevel(root)
+        _win_save_contact[row_id] = dlg
+        dlg.protocol("WM_DELETE_WINDOW", lambda: (_win_save_contact.pop(row_id, None), dlg.destroy()))
         dlg.title("Guardar en Agenda")
         dlg.geometry("520x260")
         dlg.configure(bg=BG)
@@ -851,18 +896,19 @@ def add_recipient_row(name_default="", key_default=""):
         dlg_signing = StyledEntry(form, width=40)
         dlg_signing.grid(row=2, column=1, sticky="w", padx=8, pady=3)
 
-        def _validate_hex_key(value, expected_bytes, label):
-            """Valida que un valor sea hexadecimal con la longitud correcta."""
+        def _validate_key(value, expected_bytes, label):
+            """Valida el formato y longitud de la llave sin revelar detalles internos."""
             try:
                 raw = bytes.fromhex(value)
             except ValueError:
                 messagebox.showerror("Llave inválida",
-                    f"La {label} no tiene formato hexadecimal válido.",
+                    f"La {label} ingresada no es válida.\n"
+                    "Verifica que sea una llave correcta y completa.",
                     parent=dlg)
                 return False
             if len(raw) != expected_bytes:
                 messagebox.showerror("Llave inválida",
-                    f"La {label} no tiene la longitud correcta.\n"
+                    f"La {label} ingresada no tiene la longitud correcta.\n"
                     "Verifica que sea una llave completa y correcta.",
                     parent=dlg)
                 return False
@@ -878,13 +924,11 @@ def add_recipient_row(name_default="", key_default=""):
                     "• Nombre\n• Llave pública de acceso\n• Llave pública de firma",
                     parent=dlg)
                 return
-            # Validar formato y longitud de ambas llaves
-            if not _validate_hex_key(acc, 65, "llave pública de acceso"):
+            if not _validate_key(acc, 65, "llave pública de acceso"):
                 return
-            if not _validate_hex_key(sign, 32, "llave pública de firma"):
+            if not _validate_key(sign, 32, "llave pública de firma"):
                 return
             c = load_contacts()
-            # Verificar que la llave de acceso no pertenezca a otro contacto
             dup = find_duplicate_access_key(c, acc, exclude_name=name)
             if dup:
                 messagebox.showerror("Llave duplicada",
@@ -895,6 +939,7 @@ def add_recipient_row(name_default="", key_default=""):
             c[name] = {"access": acc, "signing": sign}
             save_contacts(c)
             set_status(f"✔ '{name}' guardado en la agenda.", SUCCESS)
+            _win_save_contact.pop(row_id, None)
             dlg.destroy()
 
         StyledButton(dlg, "💾 Guardar en Agenda", do_save, color=TEAL).pack(pady=10)
@@ -913,10 +958,10 @@ def add_recipient_row(name_default="", key_default=""):
 
     def remove():
         if not messagebox.askyesno(
-            "Eliminar recipient",
-            "⚠️ Eliminar este recipient solo afecta FUTUROS cifrados.\n\n"
+            "Eliminar destinatario",
+            "⚠️ Eliminar este destinatario solo afecta FUTUROS cifrados.\n\n"
             "Los archivos ya cifrados siguen siendo accesibles para él.\n"
-            "Para revocar acceso, re-cifra sin este recipient.\n\n"
+            "Para revocar acceso, re-cifra sin este destinatario.\n\n"
             "¿Deseas eliminarlo?",
         ):
             return
@@ -971,7 +1016,7 @@ def encrypt():
     recipients = get_recipients()
     if not recipients:
         messagebox.showerror("Error",
-                             "Agrega al menos 1 recipient con nombre y llave pública.")
+                             "Agrega al menos 1 destinatario con nombre y llave pública.")
         return
 
     # Leer clave privada Ed25519 del firmante (hex → bytes)
@@ -1012,7 +1057,7 @@ def encrypt():
             "Cifrado y firmado exitoso",
             f"✔ Archivo cifrado y firmado correctamente.\n\n"
             f"Contenedor:\n{result}\n\n"
-            f"Recipients: {', '.join(recipients.keys())}",
+            f"Destinatarios: {', '.join(recipients.keys())}",
         )
     except FileExistsError as e:
         log_security_error("encrypt_output_exists", e)
@@ -1132,14 +1177,14 @@ root = tk.Tk()
 root.title("CryptoGO")
 root.configure(bg=BG)
 
-# Tamaño inicial: 90% de la pantalla disponible, máximo 800x900
+# Tamaño inicial optimizado para el diseño de pestañas
 _sw = root.winfo_screenwidth()
 _sh = root.winfo_screenheight()
-_w  = min(800, int(_sw * 0.90))
-_h  = min(900, int(_sh * 0.90))
+_w  = min(820, int(_sw * 0.90))
+_h  = min(650, int(_sh * 0.90))  # Altura inicial más compacta
 root.geometry(f"{_w}x{_h}")
 root.resizable(True, True)
-root.minsize(700, 500)
+root.minsize(720, 500)
 
 # ── Canvas + Scrollbar para scroll vertical ───────────────────────────────────
 _canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
@@ -1185,16 +1230,42 @@ tools_frame.pack(fill="x", padx=14, pady=2)
 StyledButton(tools_frame, "🔑 Llaves de acceso",
              open_keygen_window, color=VIOLET).pack(side="left", padx=3)
 StyledButton(tools_frame, "✍️ Llaves de firma",
-             open_signing_keygen_window, color=CHERRY).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_signing_keygen", open_signing_keygen_window),
+             color=CHERRY).pack(side="left", padx=3)
 StyledButton(tools_frame, "🔓 Recuperar llave de acceso privada",
-             open_recover_key_window, color=INDIGO).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_recover_key", open_recover_key_window),
+             color=INDIGO).pack(side="left", padx=3)
 StyledButton(tools_frame, "👥 Agenda",
-             open_contacts_window, color=TEAL).pack(side="left", padx=3)
+             lambda: _raise_or_create("_win_contacts", open_contacts_window),
+             color=TEAL).pack(side="left", padx=3)
 
 hsep(_root)
 
-# ── Sección: Cifrar ───────────────────────────────────────────────────────────
-enc_body = make_section(_root, "📦  CIFRAR Y FIRMAR ARCHIVO")
+# ── Pestañas Personalizadas (Diseño Plano y Moderno) ──────────────────────────
+tab_container = tk.Frame(_root, bg=BG)
+tab_container.pack(fill="both", expand=True, padx=14, pady=(4, 6))
+
+tab_bar = tk.Frame(tab_container, bg=BG)
+tab_bar.pack(fill="x", pady=(0, 2))
+
+# Botones de las pestañas
+btn_enc_tab = tk.Button(tab_bar, text=" \U0001f4e6 Cifrar y Firmar ", font=("Segoe UI", 9, "bold"),
+                        relief="flat", bg=VIOLET, fg="white", activebackground=_darken(VIOLET), 
+                        activeforeground="white", cursor="hand2", padx=12, pady=4)
+btn_enc_tab.pack(side="left", padx=(0, 2))
+
+btn_dec_tab = tk.Button(tab_bar, text=" \U0001f513 Descifrar y Verificar ", font=("Segoe UI", 9, "bold"),
+                        relief="flat", bg=BG_PANEL, fg=TEXT, activebackground=BORDER,
+                        cursor="hand2", padx=12, pady=4)
+btn_dec_tab.pack(side="left")
+
+# Contenedor principal de los paneles
+content_area = tk.Frame(tab_container, bg=BG_PANEL, highlightthickness=1, highlightbackground=BORDER)
+content_area.pack(fill="both", expand=True)
+
+# ── Pestaña 1: Cifrar y Firmar ────────────────────────────────────────────────
+tab_enc = tk.Frame(content_area, bg=BG_PANEL, padx=14, pady=12)
+enc_body = tab_enc  # alias para no cambiar el resto del código de cifrado
 
 row_file = tk.Frame(enc_body, bg=BG_PANEL)
 row_file.pack(fill="x", pady=2)
@@ -1218,23 +1289,36 @@ tk.Button(enc_body, text="Ver / Ocultar llave privada",
           bg=BG_HOVER, fg=TEXT_D, relief="flat", font=("Segoe UI", 8),
           cursor="hand2", command=_toggle_signing_priv).pack(anchor="w", pady=(0, 6))
 
-# Recipients con llave pública ECIES
-lbl(enc_body, "Recipients — nombre y llave pública (mínimo 1):",
+# Destinatarios con llave pública ECIES
+lbl(enc_body, "Destinatarios — nombre y llave pública (mínimo 1):",
     bold=True).pack(anchor="w")
 recipients_frame = tk.Frame(enc_body, bg=BG_PANEL)
 recipients_frame.pack(fill="x")
-add_recipient_row("Recipient 1")
+add_recipient_row("Destinatario 1")
 
 btn_enc = tk.Frame(enc_body, bg=BG_PANEL)
 btn_enc.pack(pady=6)
 
 def add_from_agenda():
+    global _win_agenda_enc
     contacts = load_contacts()
     if not contacts:
         messagebox.showinfo("Agenda vacía", "No tienes contactos. Ve a Herramientas -> 'Agenda' para añadir a tus destinatarios.")
         return
-    
+
+    # Si ya hay una ventana abierta, traerla al frente
+    if _win_agenda_enc is not None:
+        try:
+            _win_agenda_enc.winfo_exists()
+            _win_agenda_enc.deiconify()
+            _win_agenda_enc.lift()
+            _win_agenda_enc.focus_force()
+            return
+        except tk.TclError:
+            pass
+
     win = tk.Toplevel(root)
+    _win_agenda_enc = win
     win.title("Seleccionar Contacto")
     win.geometry("300x400")
     win.configure(bg=BG)
@@ -1254,25 +1338,25 @@ def add_from_agenda():
             add_recipient_row(name, contacts[name].get("access", ""))
             win.destroy()
 
-    StyledButton(win, "➕ Añadir como Recipient", on_select, color=INDIGO).pack(pady=10)
+    StyledButton(win, "➕ Añadir como destinatario", on_select, color=INDIGO).pack(pady=10)
 
-StyledButton(btn_enc, "+ Agregar recipient manual", add_recipient_row,
+StyledButton(btn_enc, "+ Agregar destinatario", add_recipient_row,
              color=INDIGO).pack(side="left", padx=4)
 StyledButton(btn_enc, "📘 Cargar de Agenda", add_from_agenda,
              color=TEAL).pack(side="left", padx=4)
 StyledButton(btn_enc, "🔐 Cifrar y firmar", encrypt,
              color=CHERRY).pack(side="left", padx=14)
 
-hsep(_root)
+# ── Pestaña 2: Descifrar y Verificar ─────────────────────────────────────────
+tab_dec = tk.Frame(content_area, bg=BG_PANEL, padx=14, pady=12)
 
-# ── Sección: Descifrar ────────────────────────────────────────────────────────
-dec_body = make_section(_root, "🔓  DESCIFRAR Y VERIFICAR FIRMA")
+dec_body = tab_dec  # alias para no cambiar el resto del código de descifrado
 
-lbl(dec_body, "Tu llave privada:", bold=True, color=DANGER).pack(anchor="w")
+lbl(dec_body, "Tu llave privada de acceso:", bold=True, color=DANGER).pack(anchor="w")
 entry_dec_priv = StyledEntry(dec_body, show_char="•", width=82)
 entry_dec_priv.pack(fill="x", pady=(2, 8))
 
-lbl(dec_body, "Tu llave pública:", bold=True).pack(anchor="w")
+lbl(dec_body, "Tu llave pública de acceso:", bold=True).pack(anchor="w")
 entry_dec_pub = StyledEntry(dec_body, width=82)
 entry_dec_pub.pack(fill="x", pady=(2, 8))
 
@@ -1285,11 +1369,25 @@ entry_dec_signing_pub = StyledEntry(sign_row, width=65)
 entry_dec_signing_pub.pack(side="left")
 
 def load_sender_from_agenda():
+    global _win_agenda_dec
     contacts = load_contacts()
     if not contacts:
         messagebox.showinfo("Agenda vacía", "No tienes contactos.")
         return
+
+    # Si ya hay una ventana abierta, traerla al frente
+    if _win_agenda_dec is not None:
+        try:
+            _win_agenda_dec.winfo_exists()
+            _win_agenda_dec.deiconify()
+            _win_agenda_dec.lift()
+            _win_agenda_dec.focus_force()
+            return
+        except tk.TclError:
+            pass
+
     win = tk.Toplevel(root)
+    _win_agenda_dec = win
     win.title("Seleccionar Remitente")
     win.geometry("300x400")
     win.configure(bg=BG)
@@ -1318,7 +1416,26 @@ btn_dec = tk.Frame(dec_body, bg=BG_PANEL)
 btn_dec.pack(pady=4)
 StyledButton(btn_dec, "🔓 Verificar firma y descifrar", decrypt, color=VIOLET).pack()
 
+# Lógica de cambio de pestañas
+def show_tab(tab_name):
+    if tab_name == "enc":
+        tab_dec.pack_forget()
+        tab_enc.pack(fill="both", expand=True)
+        btn_enc_tab.config(bg=VIOLET, fg="white")
+        btn_dec_tab.config(bg=BG_PANEL, fg=TEXT)
+    else:
+        tab_enc.pack_forget()
+        tab_dec.pack(fill="both", expand=True)
+        btn_dec_tab.config(bg=VIOLET, fg="white")
+        btn_enc_tab.config(bg=BG_PANEL, fg=TEXT)
+
+btn_enc_tab.config(command=lambda: show_tab("enc"))
+btn_dec_tab.config(command=lambda: show_tab("dec"))
+
+show_tab("enc")  # Mostrar la primera pestaña por defecto
+
 hsep(_root)
+
 
 # ── Barra de estado ───────────────────────────────────────────────────────────
 status_bar = tk.Frame(_root, bg=BG_PANEL, pady=5, padx=14,
