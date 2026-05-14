@@ -370,7 +370,7 @@ def open_keygen_window():
     StyledButton(btn_row, "⚡ Generar",          do_generate,    color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",       toggle_priv,    color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",    copy_pub,       color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
@@ -515,7 +515,7 @@ def open_signing_keygen_window():
     StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET).pack(side="left", padx=3)
     StyledButton(btn_row, "👁 Ver/Ocultar",     toggle_priv, color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",  copy_pub,    color=ROSE).pack(side="left", padx=3)
-    StyledButton(btn_row, "💾 Guardar Pública (.txt)", save_pub,  color=INDIGO).pack(side="left", padx=3)
+    StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
 
@@ -913,10 +913,10 @@ def add_recipient_row(name_default="", key_default=""):
 
     def remove():
         if not messagebox.askyesno(
-            "Eliminar recipient",
-            "⚠️ Eliminar este recipient solo afecta FUTUROS cifrados.\n\n"
+            "Eliminar destinatario",
+            "⚠️ Eliminar este destinatario solo afecta FUTUROS cifrados.\n\n"
             "Los archivos ya cifrados siguen siendo accesibles para él.\n"
-            "Para revocar acceso, re-cifra sin este recipient.\n\n"
+            "Para revocar acceso, re-cifra sin este destinatario.\n\n"
             "¿Deseas eliminarlo?",
         ):
             return
@@ -971,7 +971,7 @@ def encrypt():
     recipients = get_recipients()
     if not recipients:
         messagebox.showerror("Error",
-                             "Agrega al menos 1 recipient con nombre y llave pública.")
+                             "Agrega al menos 1 destinatario con nombre y llave pública.")
         return
 
     # Leer clave privada Ed25519 del firmante (hex → bytes)
@@ -1012,7 +1012,7 @@ def encrypt():
             "Cifrado y firmado exitoso",
             f"✔ Archivo cifrado y firmado correctamente.\n\n"
             f"Contenedor:\n{result}\n\n"
-            f"Recipients: {', '.join(recipients.keys())}",
+            f"Destinatarios: {', '.join(recipients.keys())}",
         )
     except FileExistsError as e:
         log_security_error("encrypt_output_exists", e)
@@ -1218,12 +1218,12 @@ tk.Button(enc_body, text="Ver / Ocultar llave privada",
           bg=BG_HOVER, fg=TEXT_D, relief="flat", font=("Segoe UI", 8),
           cursor="hand2", command=_toggle_signing_priv).pack(anchor="w", pady=(0, 6))
 
-# Recipients con llave pública ECIES
-lbl(enc_body, "Recipients — nombre y llave pública (mínimo 1):",
+# Destinatarios con llave pública ECIES
+lbl(enc_body, "Destinatarios — nombre y llave pública (mínimo 1):",
     bold=True).pack(anchor="w")
 recipients_frame = tk.Frame(enc_body, bg=BG_PANEL)
 recipients_frame.pack(fill="x")
-add_recipient_row("Recipient 1")
+add_recipient_row("Destinatario 1")
 
 btn_enc = tk.Frame(enc_body, bg=BG_PANEL)
 btn_enc.pack(pady=6)
@@ -1254,9 +1254,9 @@ def add_from_agenda():
             add_recipient_row(name, contacts[name].get("access", ""))
             win.destroy()
 
-    StyledButton(win, "➕ Añadir como Recipient", on_select, color=INDIGO).pack(pady=10)
+    StyledButton(win, "➕ Añadir como destinatario", on_select, color=INDIGO).pack(pady=10)
 
-StyledButton(btn_enc, "+ Agregar recipient manual", add_recipient_row,
+StyledButton(btn_enc, "+ Agregar destinatario", add_recipient_row,
              color=INDIGO).pack(side="left", padx=4)
 StyledButton(btn_enc, "📘 Cargar de Agenda", add_from_agenda,
              color=TEAL).pack(side="left", padx=4)
@@ -1268,11 +1268,11 @@ hsep(_root)
 # ── Sección: Descifrar ────────────────────────────────────────────────────────
 dec_body = make_section(_root, "🔓  DESCIFRAR Y VERIFICAR FIRMA")
 
-lbl(dec_body, "Tu llave privada:", bold=True, color=DANGER).pack(anchor="w")
+lbl(dec_body, "Tu llave privada de acceso:", bold=True, color=DANGER).pack(anchor="w")
 entry_dec_priv = StyledEntry(dec_body, show_char="•", width=82)
 entry_dec_priv.pack(fill="x", pady=(2, 8))
 
-lbl(dec_body, "Tu llave pública:", bold=True).pack(anchor="w")
+lbl(dec_body, "Tu llave pública de acceso:", bold=True).pack(anchor="w")
 entry_dec_pub = StyledEntry(dec_body, width=82)
 entry_dec_pub.pack(fill="x", pady=(2, 8))
 
