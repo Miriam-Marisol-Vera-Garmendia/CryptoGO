@@ -85,6 +85,19 @@ def save_contacts(contacts: dict[str, str]):
         json.dump(contacts, f, indent=4, ensure_ascii=False)
 
 
+def find_duplicate_access_key(contacts: dict, access_key: str, exclude_name: str = "") -> str | None:
+    """Busca si la llave de acceso ya pertenece a otro contacto.
+    Retorna el nombre del contacto duplicado, o None si no hay duplicado."""
+    if not access_key:
+        return None
+    for name, data in contacts.items():
+        if name == exclude_name:
+            continue
+        if data.get("access") == access_key:
+            return name
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Paleta
 # ──────────────────────────────────────────────────────────────────────────────
@@ -690,6 +703,21 @@ def open_contacts_window():
             messagebox.showwarning("Error", "Debes ingresar un nombre y al menos una llave.", parent=win)
             return
         c = load_contacts()
+        if name in c:
+            if not messagebox.askyesno(
+                "Contacto existente",
+                f"'{name}' ya existe en la agenda.\n¿Deseas actualizar sus llaves?",
+                parent=win,
+            ):
+                return
+        # Verificar que la llave de acceso no pertenezca a otro contacto
+        dup = find_duplicate_access_key(c, acc_key, exclude_name=name)
+        if dup:
+            messagebox.showerror("Llave duplicada",
+                f"La llave pública de acceso ya está registrada para '{dup}'.\n\n"
+                "Cada contacto debe tener una llave de acceso única.",
+                parent=win)
+            return
         c[name] = {"access": acc_key, "signing": sign_key}
         save_contacts(c)
         name_entry.delete(0, tk.END)
@@ -772,14 +800,34 @@ def add_recipient_row(name_default="", key_default=""):
             )
             return
 
-        # Mini-diálogo para completar la llave de firma
+        # Verificar si el contacto ya existe
+        existing = load_contacts()
+        if n in existing:
+            # Ya existe: solo preguntar si desea actualizar la llave de acceso
+            if messagebox.askyesno(
+                "Contacto existente",
+                f"'{n}' ya existe en la agenda.\n¿Deseas actualizar su llave de acceso?",
+            ):
+                # Verificar que la llave no pertenezca a otro contacto
+                dup = find_duplicate_access_key(existing, k, exclude_name=n)
+                if dup:
+                    messagebox.showerror("Llave duplicada",
+                        f"La llave de acceso ya está registrada para '{dup}'.\n\n"
+                        "Cada contacto debe tener una llave de acceso única.")
+                else:
+                    existing[n]["access"] = k
+                    save_contacts(existing)
+                    set_status(f"✔ Llave de acceso de '{n}' actualizada.", SUCCESS)
+            return
+
+        # Contacto nuevo: abrir diálogo para pedir la llave de firma
         dlg = tk.Toplevel(root)
         dlg.title("Guardar en Agenda")
         dlg.geometry("520x260")
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
 
-        tk.Label(dlg, text="Guardar contacto en la agenda", bg=BG, fg=TEXT,
+        tk.Label(dlg, text="Nuevo contacto", bg=BG, fg=TEXT,
                  font=("Segoe UI", 11, "bold")).pack(pady=(14, 4))
 
         form = tk.Frame(dlg, bg=BG_PANEL, padx=14, pady=12,
@@ -803,11 +851,6 @@ def add_recipient_row(name_default="", key_default=""):
         dlg_signing = StyledEntry(form, width=40)
         dlg_signing.grid(row=2, column=1, sticky="w", padx=8, pady=3)
 
-        # Pre-llenar la llave de firma si el contacto ya existe
-        existing = load_contacts()
-        if n in existing and existing[n].get("signing"):
-            dlg_signing.insert(0, existing[n]["signing"])
-
         def _validate_hex_key(value, expected_bytes, label):
             """Valida que un valor sea hexadecimal con la longitud correcta."""
             try:
@@ -819,7 +862,7 @@ def add_recipient_row(name_default="", key_default=""):
                 return False
             if len(raw) != expected_bytes:
                 messagebox.showerror("Llave inválida",
-                    f"La {label} tiene {len(raw)} bytes, se esperan {expected_bytes}.\n"
+                    f"La {label} no tiene la longitud correcta.\n"
                     "Verifica que sea una llave completa y correcta.",
                     parent=dlg)
                 return False
@@ -841,11 +884,14 @@ def add_recipient_row(name_default="", key_default=""):
             if not _validate_hex_key(sign, 32, "llave pública de firma"):
                 return
             c = load_contacts()
-            if name in c:
-                if not messagebox.askyesno("Contacto existente",
-                    f"'{name}' ya existe.\n¿Deseas actualizar sus llaves?",
-                    parent=dlg):
-                    return
+            # Verificar que la llave de acceso no pertenezca a otro contacto
+            dup = find_duplicate_access_key(c, acc, exclude_name=name)
+            if dup:
+                messagebox.showerror("Llave duplicada",
+                    f"La llave de acceso ya está registrada para '{dup}'.\n\n"
+                    "Cada contacto debe tener una llave de acceso única.",
+                    parent=dlg)
+                return
             c[name] = {"access": acc, "signing": sign}
             save_contacts(c)
             set_status(f"✔ '{name}' guardado en la agenda.", SUCCESS)
