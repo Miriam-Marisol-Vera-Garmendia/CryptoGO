@@ -207,6 +207,65 @@ def hsep(parent):
     tk.Frame(parent, height=1, bg=BORDER).pack(fill="x", padx=14, pady=3)
 
 
+# Simple tooltip helper for widgets
+class ToolTip:
+    def __init__(self, widget, text: str, delay: int = 500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.tipwindow = None
+        self.id = None
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, event=None):
+        self._unschedule()
+        try:
+            self.id = self.widget.after(self.delay, self._show)
+        except Exception:
+            self.id = None
+
+    def _unschedule(self):
+        if self.id:
+            try:
+                self.widget.after_cancel(self.id)
+            except Exception:
+                pass
+            self.id = None
+
+    def _show(self):
+        if self.tipwindow or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 20
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 10
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tw, text=self.text, bg="#111", fg="#fff",
+                           font=("Segoe UI", 8), bd=1, relief="solid")
+            lbl.pack(ipadx=4, ipady=2)
+        except Exception:
+            self.tipwindow = None
+
+    def _hide(self, event=None):
+        self._unschedule()
+        if self.tipwindow:
+            try:
+                self.tipwindow.destroy()
+            except Exception:
+                pass
+            self.tipwindow = None
+
+
+def create_tooltip(widget, text: str, delay: int = 500):
+    try:
+        return ToolTip(widget, text, delay)
+    except Exception:
+        return None
+
+
 selected_file: str | None = None
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
 _remove_buttons: dict = {}
@@ -368,6 +427,13 @@ def open_keygen_window():
         fp_var.set(f"Huella: {public_key_fingerprint(pub)}")
         set_status("✔ Par de llaves generado.", SUCCESS)
 
+    # Accesibilidad: atajo de teclado para generar (Ctrl+G)
+    try:
+        win.bind("<Control-g>", lambda e: do_generate())
+        win.bind("<Control-G>", lambda e: do_generate())
+    except Exception:
+        pass
+
     def toggle_priv():
         s = priv_entry.cget("show")
         priv_entry.config(state="normal", show="" if s == "•" else "•")
@@ -448,10 +514,11 @@ def open_keygen_window():
                 messagebox.showerror("Error", "No fue posible proteger la llave.", parent=pw_win)
 
         StyledButton(pw_win, "🔒 Cifrar y guardar", do_save, color=TEAL).pack()
-
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
-    StyledButton(btn_row, "⚡ Generar",          do_generate,    color=VIOLET).pack(side="left", padx=3)
+    gen_btn = StyledButton(btn_row, "⚡ Generar", do_generate, color=VIOLET)
+    gen_btn.pack(side="left", padx=3)
+    create_tooltip(gen_btn, "Generar par de llaves (atajo: Ctrl+G)")
     StyledButton(btn_row, "👁 Ver/Ocultar",       toggle_priv,    color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",    copy_pub,       color=ROSE).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar privada",   copy_priv,      color=DANGER).pack(side="left", padx=3)
@@ -518,6 +585,13 @@ def open_signing_keygen_window():
             entry.insert(0, val); entry.config(state="readonly", show=show)
         sid_var.set(f"Identificador de firma: {sid}")
         set_status("✔ Par de llaves de firma generado.", SUCCESS)
+
+    # Accesibilidad: atajo de teclado para generar (Ctrl+G)
+    try:
+        win.bind("<Control-g>", lambda e: do_generate())
+        win.bind("<Control-G>", lambda e: do_generate())
+    except Exception:
+        pass
 
     def toggle_priv():
         s = priv_entry.cget("show")
@@ -604,7 +678,9 @@ def open_signing_keygen_window():
 
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
-    StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET).pack(side="left", padx=3)
+    gen_btn_sign = StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET)
+    gen_btn_sign.pack(side="left", padx=3)
+    create_tooltip(gen_btn_sign, "Generar par de llaves de firma (atajo: Ctrl+G)")
     StyledButton(btn_row, "👁 Ver/Ocultar",     toggle_priv, color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",  copy_pub,    color=ROSE).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar privada",  copy_priv,   color=DANGER).pack(side="left", padx=3)
