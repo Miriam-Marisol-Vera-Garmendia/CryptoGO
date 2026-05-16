@@ -207,6 +207,65 @@ def hsep(parent):
     tk.Frame(parent, height=1, bg=BORDER).pack(fill="x", padx=14, pady=3)
 
 
+# Simple tooltip helper for widgets
+class ToolTip:
+    def __init__(self, widget, text: str, delay: int = 500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.tipwindow = None
+        self.id = None
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, event=None):
+        self._unschedule()
+        try:
+            self.id = self.widget.after(self.delay, self._show)
+        except Exception:
+            self.id = None
+
+    def _unschedule(self):
+        if self.id:
+            try:
+                self.widget.after_cancel(self.id)
+            except Exception:
+                pass
+            self.id = None
+
+    def _show(self):
+        if self.tipwindow or not self.text:
+            return
+        try:
+            x = self.widget.winfo_rootx() + 20
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 10
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            lbl = tk.Label(tw, text=self.text, bg="#111", fg="#fff",
+                           font=("Segoe UI", 8), bd=1, relief="solid")
+            lbl.pack(ipadx=4, ipady=2)
+        except Exception:
+            self.tipwindow = None
+
+    def _hide(self, event=None):
+        self._unschedule()
+        if self.tipwindow:
+            try:
+                self.tipwindow.destroy()
+            except Exception:
+                pass
+            self.tipwindow = None
+
+
+def create_tooltip(widget, text: str, delay: int = 500):
+    try:
+        return ToolTip(widget, text, delay)
+    except Exception:
+        return None
+
+
 selected_file: str | None = None
 recipient_rows: list[tuple[tk.Entry, tk.Entry]] = []
 _remove_buttons: dict = {}
@@ -251,9 +310,41 @@ def is_allowed_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in ALLOWED_FILE_EXTENSIONS
 
 def copy_to_clipboard(text: str):
-    root.clipboard_clear()
-    root.clipboard_append(text)
-    root.update()
+    import ctypes
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+
+    CF_UNICODETEXT = 13
+    fmt = user32.RegisterClipboardFormatW('ExcludeClipboardContentFromMonitorProcessing')
+    
+    if not user32.OpenClipboard(None):
+        return
+    user32.EmptyClipboard()
+    
+    text_encoded = text.encode('utf-16le') + b'\0\0'
+    hMem = kernel32.GlobalAlloc(0x0042, len(text_encoded))
+    if hMem:
+        pMem = kernel32.GlobalLock(hMem)
+        ctypes.memmove(pMem, text_encoded, len(text_encoded))
+        kernel32.GlobalUnlock(hMem)
+        user32.SetClipboardData(CF_UNICODETEXT, hMem)
+    
+    hEx = kernel32.GlobalAlloc(0x0042, 1)
+    if hEx:
+        pEx = kernel32.GlobalLock(hEx)
+        ctypes.memset(pEx, 0, 1)
+        kernel32.GlobalUnlock(hEx)
+        user32.SetClipboardData(fmt, hEx)
+    
+    user32.CloseClipboard()
 
 
 def set_status(msg: str, color: str = TEXT_DIM):
@@ -294,7 +385,6 @@ def _resolve_container(base_dir: str) -> Path | None:
 def open_keygen_window():
     win = tk.Toplevel(root)
     win.title("Generar par de llaves de acceso")
-    win.geometry("700x390")
     win.resizable(False, False)
     win.configure(bg=BG)
 
@@ -337,15 +427,31 @@ def open_keygen_window():
         fp_var.set(f"Huella: {public_key_fingerprint(pub)}")
         set_status("✔ Par de llaves generado.", SUCCESS)
 
+    # Accesibilidad: atajo de teclado para generar (Ctrl+G)
+    try:
+        win.bind("<Control-g>", lambda e: do_generate())
+        win.bind("<Control-G>", lambda e: do_generate())
+    except Exception:
+        pass
+
     def toggle_priv():
         s = priv_entry.cget("show")
         priv_entry.config(state="normal", show="" if s == "•" else "•")
         priv_entry.config(state="readonly")
 
     def copy_pub():
-        if pub_hex.get():
-            copy_to_clipboard(pub_hex.get())
-            messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
+        if not pub_hex.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        copy_to_clipboard(pub_hex.get())
+        messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
+
+    def copy_priv():
+        if not priv_hex.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        copy_to_clipboard(priv_hex.get())
+        messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
 
     def save_pub():
         if not pub_hex.get():
@@ -387,7 +493,9 @@ def open_keygen_window():
             if not folder:
                 return
             import os
-            keystore_path = os.path.join(folder, "keystore")
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            keystore_path = os.path.join(folder, f"keystore_{timestamp}")
             try:
                 protect_private_key(
                     key_material=priv_hex.get(),
@@ -406,12 +514,14 @@ def open_keygen_window():
                 messagebox.showerror("Error", "No fue posible proteger la llave.", parent=pw_win)
 
         StyledButton(pw_win, "🔒 Cifrar y guardar", do_save, color=TEAL).pack()
-
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
-    StyledButton(btn_row, "⚡ Generar",          do_generate,    color=VIOLET).pack(side="left", padx=3)
+    gen_btn = StyledButton(btn_row, "⚡ Generar", do_generate, color=VIOLET)
+    gen_btn.pack(side="left", padx=3)
+    create_tooltip(gen_btn, "Generar par de llaves (atajo: Ctrl+G)")
     StyledButton(btn_row, "👁 Ver/Ocultar",       toggle_priv,    color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",    copy_pub,       color=ROSE).pack(side="left", padx=3)
+    StyledButton(btn_row, "📋 Copiar privada",   copy_priv,      color=DANGER).pack(side="left", padx=3)
     StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
@@ -430,7 +540,6 @@ def open_signing_keygen_window():
     win = tk.Toplevel(root)
     _win_signing_keygen = win
     win.title("Generar llaves de firma")
-    win.geometry("700x400")
     win.resizable(False, False)
     win.configure(bg=BG)
 
@@ -477,20 +586,31 @@ def open_signing_keygen_window():
         sid_var.set(f"Identificador de firma: {sid}")
         set_status("✔ Par de llaves de firma generado.", SUCCESS)
 
+    # Accesibilidad: atajo de teclado para generar (Ctrl+G)
+    try:
+        win.bind("<Control-g>", lambda e: do_generate())
+        win.bind("<Control-G>", lambda e: do_generate())
+    except Exception:
+        pass
+
     def toggle_priv():
         s = priv_entry.cget("show")
         priv_entry.config(state="normal", show="" if s == "•" else "•")
         priv_entry.config(state="readonly")
 
     def copy_pub():
-        if pub_hex_var.get():
-            copy_to_clipboard(pub_hex_var.get())
-            messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
+        if not pub_hex_var.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        copy_to_clipboard(pub_hex_var.get())
+        messagebox.showinfo("Copiado", "Llave pública copiada.", parent=win)
 
     def copy_priv():
-        if priv_hex_var.get():
-            copy_to_clipboard(priv_hex_var.get())
-            messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
+        if not priv_hex_var.get():
+            messagebox.showwarning("Sin llave", "Genera un par primero.", parent=win)
+            return
+        copy_to_clipboard(priv_hex_var.get())
+        messagebox.showinfo("Copiado", "Llave privada copiada.", parent=win)
 
     def save_pub():
         if not pub_hex_var.get():
@@ -532,7 +652,9 @@ def open_signing_keygen_window():
             if not folder:
                 return
             import os
-            keystore_path = os.path.join(folder, "keystore_firma")
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            keystore_path = os.path.join(folder, f"keystore_firma_{timestamp}")
             try:
                 # La llave de firma Ed25519 en key_manager espera los bytes crudos (raw)
                 raw_bytes = bytes.fromhex(priv_hex_var.get())
@@ -556,9 +678,12 @@ def open_signing_keygen_window():
 
     btn_row = tk.Frame(win, bg=BG)
     btn_row.pack(pady=6)
-    StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET).pack(side="left", padx=3)
+    gen_btn_sign = StyledButton(btn_row, "⚡ Generar",        do_generate, color=VIOLET)
+    gen_btn_sign.pack(side="left", padx=3)
+    create_tooltip(gen_btn_sign, "Generar par de llaves de firma (atajo: Ctrl+G)")
     StyledButton(btn_row, "👁 Ver/Ocultar",     toggle_priv, color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "📋 Copiar pública",  copy_pub,    color=ROSE).pack(side="left", padx=3)
+    StyledButton(btn_row, "📋 Copiar privada",  copy_priv,   color=DANGER).pack(side="left", padx=3)
     StyledButton(btn_row, "💾 Guardar pública", save_pub,  color=INDIGO).pack(side="left", padx=3)
     StyledButton(btn_row, "🔒 Guardar privada", save_protected, color=TEAL).pack(side="left", padx=3)
 
@@ -572,7 +697,6 @@ def open_recover_key_window():
     win = tk.Toplevel(root)
     _win_recover_key = win
     win.title("Recuperar llave privada (keystore)")
-    win.geometry("580x260")
     win.configure(bg=BG)
     win.resizable(False, False)
 
@@ -1217,10 +1341,10 @@ root.configure(bg=BG)
 _sw = root.winfo_screenwidth()
 _sh = root.winfo_screenheight()
 _w  = min(820, int(_sw * 0.90))
-_h  = min(650, int(_sh * 0.90))  # Altura inicial más compacta
+_h  = min(520, int(_sh * 0.90))  # Altura inicial más ajustada al contenido
 root.geometry(f"{_w}x{_h}")
 root.resizable(True, True)
-root.minsize(720, 500)
+root.minsize(720, 480)
 
 # ── Canvas + Scrollbar para scroll vertical ───────────────────────────────────
 _canvas = tk.Canvas(root, bg=BG, highlightthickness=0)
@@ -1237,14 +1361,18 @@ def _on_frame_configure(event):
     _canvas.configure(scrollregion=_canvas.bbox("all"))
 
 def _on_canvas_configure(event):
-    _canvas.itemconfig(_inner_id, width=event.width)
+    req_h = _inner.winfo_reqheight()
+    h = event.height if event.height > req_h else req_h
+    _canvas.itemconfig(_inner_id, width=event.width, height=h)
 
 _inner.bind("<Configure>", _on_frame_configure)
 _canvas.bind("<Configure>", _on_canvas_configure)
 
 # Scroll con rueda del ratón
 def _on_mousewheel(event):
-    _canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    # Solo permitir scroll si el contenido es más alto que el canvas visible
+    if _inner.winfo_reqheight() > _canvas.winfo_height():
+        _canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 root.bind_all("<MouseWheel>", _on_mousewheel)
 
 # A partir de aquí todos los widgets van dentro de _inner (no de root)
@@ -1268,7 +1396,7 @@ StyledButton(tools_frame, "🔑 Llaves de acceso",
 StyledButton(tools_frame, "✍️ Llaves de firma",
              lambda: _raise_or_create("_win_signing_keygen", open_signing_keygen_window),
              color=CHERRY).pack(side="left", padx=3)
-StyledButton(tools_frame, "🔓 Recuperar llave de acceso privada",
+StyledButton(tools_frame, "🔓 Recuperar llave privada",
              lambda: _raise_or_create("_win_recover_key", open_recover_key_window),
              color=INDIGO).pack(side="left", padx=3)
 StyledButton(tools_frame, "👥 Agenda",
@@ -1481,5 +1609,17 @@ status_var   = tk.StringVar(value="  Listo")
 status_label = tk.Label(status_bar, textvariable=status_var, bg=BG_PANEL, fg=TEXT_DIM,
                         font=("Consolas", 8), anchor="w")
 status_label.pack(fill="x")
+
+import atexit
+def _clear_clipboard_on_exit():
+    import ctypes
+    try:
+        user32 = ctypes.windll.user32
+        if user32.OpenClipboard(None):
+            user32.EmptyClipboard()
+            user32.CloseClipboard()
+    except Exception:
+        pass
+atexit.register(_clear_clipboard_on_exit)
 
 root.mainloop()
