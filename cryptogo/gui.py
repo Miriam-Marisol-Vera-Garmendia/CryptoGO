@@ -116,6 +116,25 @@ def find_duplicate_access_key(contacts: dict, access_key: str, exclude_name: str
     return None
 
 
+def validate_key_format(value: str, expected_bytes: int, label: str, parent=None) -> bool:
+    """Valida formato hex y longitud de una llave; muestra error si es inválida."""
+    if not value:
+        return False
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError:
+        messagebox.showerror("Llave inválida",
+            f"La {label} ingresada no es válida.\nVerifica que sea una llave correcta y completa.",
+            parent=parent)
+        return False
+    if len(raw) != expected_bytes:
+        messagebox.showerror("Llave inválida",
+            f"La {label} ingresada no tiene la longitud correcta.\nVerifica que sea una llave completa y correcta.",
+            parent=parent)
+        return False
+    return True
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 #  Paleta
 # ──────────────────────────────────────────────────────────────────────────────
@@ -892,6 +911,25 @@ def open_contacts_window():
         if not name or (not acc_key and not sign_key):
             messagebox.showwarning("Error", "Debes ingresar un nombre y al menos una llave.", parent=win)
             return
+        # Validar formato de llaves antes de guardar (si fueron provistas)
+        if acc_key:
+            try:
+                raw_acc = bytes.fromhex(acc_key)
+            except ValueError:
+                messagebox.showerror("Llave inválida", "La llave pública de acceso no es válida o está incompleta.", parent=win)
+                return
+            if len(raw_acc) != 65:
+                messagebox.showerror("Llave inválida", "La llave pública de acceso no es válida o está incompleta.", parent=win)
+                return
+        if sign_key:
+            try:
+                raw_sign = bytes.fromhex(sign_key)
+            except ValueError:
+                messagebox.showerror("Llave inválida", "La llave pública de firma no es válida o está incompleta.", parent=win)
+                return
+            if len(raw_sign) != 32:
+                messagebox.showerror("Llave inválida", "La llave pública de firma no es válida o está incompleta.", parent=win)
+                return
         c = load_contacts()
         if name in c:
             if not messagebox.askyesno(
