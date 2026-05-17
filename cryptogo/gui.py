@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 import time
+import platform
 
 from cryptogo.encryption.hybrid_vault import (
     encrypt_file_for_recipients,
@@ -329,41 +330,62 @@ def is_allowed_file(path: str | Path) -> bool:
     return Path(path).suffix.lower() in ALLOWED_FILE_EXTENSIONS
 
 def copy_to_clipboard(text: str):
+    if platform.system() == 'Windows':
+        _copy_to_clipboard_windows(text)
+    else:
+        _copy_to_clipboard_native(text)
+
+
+def _copy_to_clipboard_native(text: str):
+    """Cross-platform clipboard copy using Tkinter"""
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+    except Exception as e:
+        set_status(f"Error al copiar: {e}", DANGER)
+
+
+def _copy_to_clipboard_windows(text: str):
+    """Windows-specific clipboard copy to avoid process monitoring"""
     import ctypes
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
 
-    kernel32.GlobalAlloc.restype = ctypes.c_void_p
-    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-    user32.SetClipboardData.restype = ctypes.c_void_p
-    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
 
-    CF_UNICODETEXT = 13
-    fmt = user32.RegisterClipboardFormatW('ExcludeClipboardContentFromMonitorProcessing')
-    
-    if not user32.OpenClipboard(None):
-        return
-    user32.EmptyClipboard()
-    
-    text_encoded = text.encode('utf-16le') + b'\0\0'
-    hMem = kernel32.GlobalAlloc(0x0042, len(text_encoded))
-    if hMem:
-        pMem = kernel32.GlobalLock(hMem)
-        ctypes.memmove(pMem, text_encoded, len(text_encoded))
-        kernel32.GlobalUnlock(hMem)
-        user32.SetClipboardData(CF_UNICODETEXT, hMem)
-    
-    hEx = kernel32.GlobalAlloc(0x0042, 1)
-    if hEx:
-        pEx = kernel32.GlobalLock(hEx)
-        ctypes.memset(pEx, 0, 1)
-        kernel32.GlobalUnlock(hEx)
-        user32.SetClipboardData(fmt, hEx)
-    
-    user32.CloseClipboard()
+        CF_UNICODETEXT = 13
+        fmt = user32.RegisterClipboardFormatW('ExcludeClipboardContentFromMonitorProcessing')
+        
+        if not user32.OpenClipboard(None):
+            return
+        user32.EmptyClipboard()
+        
+        text_encoded = text.encode('utf-16le') + b'\0\0'
+        hMem = kernel32.GlobalAlloc(0x0042, len(text_encoded))
+        if hMem:
+            pMem = kernel32.GlobalLock(hMem)
+            ctypes.memmove(pMem, text_encoded, len(text_encoded))
+            kernel32.GlobalUnlock(hMem)
+            user32.SetClipboardData(CF_UNICODETEXT, hMem)
+        
+        hEx = kernel32.GlobalAlloc(0x0042, 1)
+        if hEx:
+            pEx = kernel32.GlobalLock(hEx)
+            ctypes.memset(pEx, 0, 1)
+            kernel32.GlobalUnlock(hEx)
+            user32.SetClipboardData(fmt, hEx)
+        
+        user32.CloseClipboard()
+    except Exception as e:
+        set_status(f"Error al copiar: {e}", DANGER)
 
 
 def set_status(msg: str, color: str = TEXT_DIM):
@@ -1649,7 +1671,24 @@ status_label = tk.Label(status_bar, textvariable=status_var, bg=BG_PANEL, fg=TEX
 status_label.pack(fill="x")
 
 import atexit
+
 def _clear_clipboard_on_exit():
+    if platform.system() == 'Windows':
+        _clear_clipboard_on_exit_windows()
+    else:
+        _clear_clipboard_on_exit_native()
+
+
+def _clear_clipboard_on_exit_native():
+    """Cross-platform clipboard clearing"""
+    try:
+        root.clipboard_clear()
+    except Exception:
+        pass
+
+
+def _clear_clipboard_on_exit_windows():
+    """Windows-specific clipboard clearing"""
     import ctypes
     try:
         user32 = ctypes.windll.user32
@@ -1658,6 +1697,8 @@ def _clear_clipboard_on_exit():
             user32.CloseClipboard()
     except Exception:
         pass
+
+
 atexit.register(_clear_clipboard_on_exit)
 
 root.mainloop()
