@@ -1,3 +1,6 @@
+> **Nota:** Este documento contiene la explicación técnica y de seguridad del proyecto.  
+> Para instrucciones de instalación, ejecución y pruebas, consultar el archivo `README.md` principal del repositorio. 
+
 # **D1 - Architecture & Threat Model**
 ## **Objetivo**
 Diseñar la Bóveda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
