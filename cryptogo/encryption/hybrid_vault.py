@@ -5,6 +5,8 @@ import io
 import json
 import os
 import struct
+import tempfile
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -458,8 +460,11 @@ def _write_container(
          ├── authentication_tag — tag Poly1305
          └── signature         — firma Ed25519 de 64 bytes (raw)
     """
-    tmp_dir = container_dir.parent / f".tmp_{container_dir.name}_{os.getpid()}"
-    tmp_dir.mkdir(parents=True, exist_ok=False)
+    tmp_dir_str = tempfile.mkdtemp(
+        prefix=f".tmp_{container_dir.name}_", 
+        dir=container_dir.parent
+    )
+    tmp_dir = Path(tmp_dir_str)
     try:
         (tmp_dir / "header").write_bytes(header_bytes)
         (tmp_dir / "recipients").write_bytes(recipients_bytes)
@@ -469,7 +474,6 @@ def _write_container(
         (tmp_dir / "signature").write_bytes(signature)
         tmp_dir.rename(container_dir)
     except Exception:
-        import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
 
@@ -662,17 +666,17 @@ def decrypt_file_for_recipient(
     header_bytes, recipients_bytes, nonce, ciphertext, tag, signature = \
         _read_container(container_dir)
 
-    # ── 2. Validar formato del header ────────────────────────────────────────
+    # ── 2. VERIFICAR FIRMA ANTES DE CUALQUIER PARSEO ─────────────────────────
+    signed_data = _build_signed_data(header_bytes, recipients_bytes, nonce, ciphertext, tag)
+    verify_signature(signed_data, signature, signing_public_key)
+    # Si verify_signature no lanza excepción, la firma es válida → continuar
+
+    # ── 3. Validar formato del header y deserializar ─────────────────────────
     header     = _validate_header(header_bytes)
     recipients = _deserialize_recipients(recipients_bytes)
 
     if header["recipients_count"] != len(recipients):
         raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
-
-    # ── 3. VERIFICAR FIRMA ANTES DE DESCIFRAR ────────────────────────────────
-    signed_data = _build_signed_data(header_bytes, recipients_bytes, nonce, ciphertext, tag)
-    verify_signature(signed_data, signature, signing_public_key)
-    # Si verify_signature no lanza excepción, la firma es válida → continuar
 
     # ── 4. Localizar entrada del destinatario ────────────────────────────────
     my_key_id = public_key_fingerprint(recipient_public_key_hex)
