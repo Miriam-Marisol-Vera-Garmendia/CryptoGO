@@ -13,7 +13,6 @@ from cryptogo.encryption.hybrid_vault import (
     generate_ecies_keypair,
     generate_signing_keypair,
     get_container_info,
-    public_key_fingerprint,
 )
 from cryptogo.encryption.key_manager import (
     protect_private_key,

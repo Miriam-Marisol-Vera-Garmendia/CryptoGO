@@ -291,8 +291,7 @@ Cunado el archivo este cifrado, la **file key** no se transmite en texto plano; 
 Cuando un usuario abre un archivo compartido, el sistema revisa la sección de destinatario dentro del contenedor para identificar la entrada correspondiente; una vez localizada, toma la llave cifrada asociada a ese usuario y la intenta descifrar con su clave privada. Si la clave privada corresponde a la clave pública utilizada al cifrar esa entrada, el usuario recupera la **file key**; porteriormente, esta se emplea para descifrar el contenido del archivo con ChaCha20-Poly1305 y si el usuario no está autorizado, si la clave privada es incorrecta, o si el contenedor fue modificado, el descifrado falla de forma segura.
 
 ## **3. Mecanismo de identificación de claves**
-Para que cada destinatario localice su clave de forma correcta, se define un mecanismo de identificación basado en dos elementos: un identificador explícito de usuario (**id**) que nos indicará a qué usuario pertenece cada entrada y una huella digital de la clave pública (**key_id**) la cual estará asociada a dicha entrada con una clave pública.
-Este mecanismo reduce el riesgo de confusión porque, dado un identificador, siempre se localiza la misma entrada correspondiente. Además, la inclusión de la huella digital de la clave pública dificulta que un intercambio de identidades o una sustitución de claves pase desapercibido.
+Cada destinatario se identifica mediante un identificador explícito de usuario (**id**). El sistema localiza la entrada correspondiente durante el descifrado intentando recuperar la **file key** con la clave privada del usuario; si el descifrado tiene éxito, se encontró la entrada correcta. Este mecanismo es seguro porque solo el usuario con la clave privada correcta puede descifrar su entrada.
 
 ## **4. Formato actualizado del cotenedor**
 El contenedor seguro incorpora toda la información necesaria para el cifrado compartido, su estructura incluye los metadatos generales del archivo, la lista de destinatarios con sus claves cifradas, el **ciphertext** del archivo y el **tag** de autenticación. Conceptualmente queda así:
@@ -300,8 +299,8 @@ El contenedor seguro incorpora toda la información necesaria para el cifrado co
 {
   "metadata": { ... },
   "recipients": [
-    { "id": "alice", "key_id": "...", "encrypted_key": "..." },
-    { "id": "bob", "key_id": "...", "encrypted_key": "..." }
+    { "id": "alice", "encrypted_key": "..." },
+    { "id": "bob", "encrypted_key": "..." }
   ],
   "nonce": "...",
   "ciphertext": "...",
