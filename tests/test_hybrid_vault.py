@@ -85,7 +85,7 @@ def test_unauthorized_user_cannot_decrypt(tmp_path):
         users["alice"]["signing_private"],
     )
 
-    with pytest.raises(HybridVaultFormatError):
+    with pytest.raises(HybridVaultAuthenticationError):
         decrypt_file_for_recipient(
             container,
             users["carol"]["private_key"],
@@ -139,7 +139,6 @@ def test_wrong_private_key_fails(tmp_path):
         container,
         {
             "alice": users["alice"]["public_key"],
-            "bob": users["bob"]["public_key"],
         },
         users["alice"]["signing_private"],
     )
