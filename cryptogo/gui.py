@@ -456,8 +456,6 @@ def open_keygen_window():
     priv_entry.pack(fill="x", pady=(2, 4))
 
     fp_var = tk.StringVar(value="")
-    tk.Label(frame, textvariable=fp_var, bg=BG_PANEL, fg=TEXT_DIM,
-             font=("Consolas", 8)).pack(anchor="w")
 
     def do_generate():
         priv, pub = generate_ecies_keypair()
@@ -465,7 +463,6 @@ def open_keygen_window():
         for entry, val, show in [(pub_entry, pub, ""), (priv_entry, priv, "•")]:
             entry.config(state="normal"); entry.delete(0, "end")
             entry.insert(0, val); entry.config(state="readonly", show=show)
-        fp_var.set(f"Huella: {public_key_fingerprint(pub)}")
         set_status("✔ Par de llaves generado.", SUCCESS)
 
     # Accesibilidad: atajo de teclado para generar (Ctrl+G)
@@ -613,8 +610,6 @@ def open_signing_keygen_window():
     priv_entry.pack(fill="x", pady=(2, 4))
 
     sid_var = tk.StringVar(value="")
-    tk.Label(frame, textvariable=sid_var, bg=BG_PANEL, fg=TEXT_DIM,
-             font=("Consolas", 8)).pack(anchor="w")
 
     def do_generate():
         priv_bytes, pub_bytes, sid = generate_signing_keypair()
@@ -624,7 +619,6 @@ def open_signing_keygen_window():
         for entry, val, show in [(pub_entry, pub_h, ""), (priv_entry, priv_h, "•")]:
             entry.config(state="normal"); entry.delete(0, "end")
             entry.insert(0, val); entry.config(state="readonly", show=show)
-        sid_var.set(f"Identificador de firma: {sid}")
         set_status("✔ Par de llaves de firma generado.", SUCCESS)
 
     # Accesibilidad: atajo de teclado para generar (Ctrl+G)
@@ -867,12 +861,11 @@ def open_inspect_window():
         f"  Tamaño original    : {info['plaintext_size']:,} bytes",
         f"  Versión contenedor : {info['container_version']}",
         f"  Verificación       : disponible",
-        f"  Identificador      : {info['signer_id']}",
         "",
         f"  Usuarios autorizados ({len(info['recipients'])}):",
     ]
     for r in info["recipients"]:
-        lines.append(f"    • {r['id']}   [{r['key_id']}]")
+        lines.append(f"    • {r['id']}")
 
     txt.insert("1.0", "\n".join(lines))
     txt.config(state="disabled")
@@ -1371,7 +1364,6 @@ def decrypt():
             f"Guardado en  : {result_path}\n\n"
             f"Archivo      : {info['original_filename']}\n"
             f"Creado       : {info['created_at']}\n"
-            f"Identificador: {info['signer_id']}\n"
             f"Tamaño       : {info['plaintext_size']:,} bytes",
         )
 
