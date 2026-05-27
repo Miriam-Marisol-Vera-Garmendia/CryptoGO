@@ -1,3 +1,6 @@
+> **Nota:** Este documento contiene la explicación técnica y de seguridad del proyecto.  
+> Para instrucciones de instalación, ejecución y pruebas, consultar el archivo `README.md` principal del repositorio. 
+
 # **D1 - Architecture & Threat Model**
 ## **Objetivo**
 Diseñar la Bóveda de Seguridad Digital de Documentos a nivel de sistema antes de implementar la criptografía.
@@ -33,7 +36,8 @@ La bóveda garantiza que si un atacante obtiene acceso al contenedor cifrado o a
   - Protección frente a adversarios con capacidades de cómputo cuántico.
 
 ## **2. Diagrama de arquitectura**
-![Diagrama de Arquitectura](https://github.com/user-attachments/assets/60cb5be4-17b1-44ac-acbd-e62ad2f949b0)
+<img width="1536" height="1024" alt="Arquitectura bien" src="https://github.com/user-attachments/assets/11ce5535-26b7-4ffd-9cf7-b176045b03bd" />
+
 
 ## **3. Requisitos de seguridad**
 * Confidencialidad del contenido:  
@@ -286,8 +290,7 @@ Cunado el archivo este cifrado, la **file key** no se transmite en texto plano; 
 Cuando un usuario abre un archivo compartido, el sistema revisa la sección de destinatario dentro del contenedor para identificar la entrada correspondiente; una vez localizada, toma la llave cifrada asociada a ese usuario y la intenta descifrar con su clave privada. Si la clave privada corresponde a la clave pública utilizada al cifrar esa entrada, el usuario recupera la **file key**; porteriormente, esta se emplea para descifrar el contenido del archivo con ChaCha20-Poly1305 y si el usuario no está autorizado, si la clave privada es incorrecta, o si el contenedor fue modificado, el descifrado falla de forma segura.
 
 ## **3. Mecanismo de identificación de claves**
-Para que cada destinatario localice su clave de forma correcta, se define un mecanismo de identificación basado en dos elementos: un identificador explícito de usuario (**id**) que nos indicará a qué usuario pertenece cada entrada y una huella digital de la clave pública (**key_id**) la cual estará asociada a dicha entrada con una clave pública.
-Este mecanismo reduce el riesgo de confusión porque, dado un identificador, siempre se localiza la misma entrada correspondiente. Además, la inclusión de la huella digital de la clave pública dificulta que un intercambio de identidades o una sustitución de claves pase desapercibido.
+Cada destinatario se identifica mediante un identificador explícito de usuario (**id**). El sistema localiza la entrada correspondiente durante el descifrado intentando recuperar la **file key** con la clave privada del usuario; si el descifrado tiene éxito, se encontró la entrada correcta. Este mecanismo es seguro porque solo el usuario con la clave privada correcta puede descifrar su entrada.
 
 ## **4. Formato actualizado del cotenedor**
 El contenedor seguro incorpora toda la información necesaria para el cifrado compartido, su estructura incluye los metadatos generales del archivo, la lista de destinatarios con sus claves cifradas, el **ciphertext** del archivo y el **tag** de autenticación. Conceptualmente queda así:
@@ -295,8 +298,8 @@ El contenedor seguro incorpora toda la información necesaria para el cifrado co
 {
   "metadata": { ... },
   "recipients": [
-    { "id": "alice", "key_id": "...", "encrypted_key": "..." },
-    { "id": "bob", "key_id": "...", "encrypted_key": "..." }
+    { "id": "alice", "encrypted_key": "..." },
+    { "id": "bob", "encrypted_key": "..." }
   ],
   "nonce": "...",
   "ciphertext": "...",
@@ -418,3 +421,424 @@ Esta verificación es lo que garantiza que el archivo realmente viene de quien d
 - **La firma debe cubrir todo el contexto del contenedor**: No basta con firmar solo el texto cifrado, también deben protegerse los metadatos, la lista de destinatarios, el nonce, el texto cifrado y la etiqueta de autenticación.
 
 - **Ataques de contexto bloqueados**: Un atacante podría modificar información importante sin tocar directamente el texto cifrado si los metadatos no se incluyen en la firma; cualquier cambio no autorizado provoca que la verificación falle y el contenedor sea rechazado antes de descifrarlo.
+
+# **D6 - Gestión Segura de Llaves (Key Management)**
+
+## **Objetivo**
+Diseñar e implementar un sistema seguro de gestión de llaves para la bóveda digital, garantizando que las llaves privadas permanezcan protegidas incluso si el almacenamiento es comprometido.
+
+Después de esta entrega, el sistema es capaz de:
+- Proteger llaves privadas mediante cifrado basado en contraseña.
+- Permitir acceso seguro a llaves únicamente a usuarios autorizados.
+- Definir un ciclo de vida realista para las llaves criptográficas.
+- Soportar respaldo y recuperación segura de llaves.
+- Mantener consistencia con el modelo de amenazas definido en D1.
+
+## **Objetivo de Seguridad**
+Las llaves privadas nunca deben almacenarse en texto plano.  
+Incluso si un atacante roba el keystore o accede al almacenamiento, no debe poder recuperar las llaves privadas sin conocer la contraseña correcta del usuario.
+
+---
+
+# **1. Protección de Llaves Privadas**
+
+### **1.1 Cifrado de llaves privadas**
+
+Las llaves privadas del sistema nunca se almacenan en texto plano.  
+Antes de guardarse en disco, cada llave privada es protegida mediante cifrado autenticado usando **ChaCha20-Poly1305** y una clave derivada de la contraseña del usuario mediante **Scrypt**.
+
+El proceso implementado en `key_manager.py` funciona de la siguiente manera:
+
+1. El usuario proporciona una contraseña.
+2. El sistema genera:
+   - una `salt` aleatoria de 32 bytes
+   - un `nonce` aleatorio de 12 bytes
+3. Se deriva una clave criptográfica de 32 bytes utilizando Scrypt.
+4. La llave privada es cifrada mediante ChaCha20-Poly1305.
+5. El resultado se almacena dentro del keystore.
+
+Además, el sistema utiliza:
+```python
+AAD = salt + nonce
+```
+
+como datos autenticados adicionales (AAD), vinculando los parámetros KDF al ciphertext para evitar manipulaciones del keystore.
+
+Esto garantiza:
+- Confidencialidad de la llave privada.
+- Detección de modificaciones.
+- Protección frente al robo del almacenamiento.
+
+---
+
+### **1.2 Parámetros del KDF**
+
+El sistema utiliza **Scrypt**, una función KDF resistente a ataques de fuerza bruta y diseñada para consumir memoria.
+
+Los parámetros implementados son:
+
+| Parámetro | Valor |
+|---|---|
+| Algoritmo | Scrypt |
+| N | 2¹⁷ |
+| r | 8 |
+| p | 1 |
+| Salt | 32 bytes |
+| Longitud derivada | 32 bytes |
+
+Estos parámetros incrementan significativamente el costo computacional y de memoria para un atacante que intente adivinar contraseñas mediante fuerza bruta.
+
+---
+
+# **2. Acceso Basado en Contraseña**
+
+### **2.1 Flujo de acceso**
+
+Cada vez que un usuario necesita utilizar su llave privada:
+
+1. El sistema solicita la contraseña.
+2. Se recuperan la `salt`, el `nonce` y la metadata del keystore.
+3. Se deriva nuevamente la clave mediante Scrypt.
+4. Se intenta descifrar la llave privada.
+5. Si la autenticación falla, el acceso es rechazado.
+
+La llave privada únicamente permanece en memoria durante el tiempo necesario para:
+- Firmar archivos.
+- Descifrar file keys.
+- Realizar operaciones criptográficas.
+
+Después de utilizarse:
+- No se almacena indefinidamente.
+- Se elimina de memoria al finalizar la operación.
+
+---
+
+### **2.2 Protección contra contraseñas incorrectas**
+
+Si el usuario introduce una contraseña incorrecta:
+- La clave derivada será diferente.
+- ChaCha20-Poly1305 fallará la autenticación.
+- El sistema rechazará automáticamente el acceso.
+
+Esto evita:
+- Descifrado parcial.
+- Filtración de información.
+- Uso de llaves corruptas.
+
+---
+
+# **3. Formato del Keystore**
+
+### **3.1 Estructura del keystore**
+
+El sistema almacena cada llave privada dentro de un directorio estructurado:
+
+```text
+keystore/
+├── metadata
+├── salt
+├── nonce
+└── encrypted_key
+```
+
+---
+
+### **3.2 Componentes del keystore**
+
+| Archivo | Descripción |
+|---|---|
+| `metadata` | Información del keystore en formato JSON |
+| `salt` | Salt usada por Scrypt |
+| `nonce` | Nonce usado por ChaCha20-Poly1305 |
+| `encrypted_key` | Llave privada cifrada junto con el authentication tag |
+
+---
+
+### **3.3 Metadata del keystore**
+
+La metadata incluye información necesaria para validar y administrar el keystore:
+
+```json
+{
+  "magic": "CRYPTOGO_KEYSTORE",
+  "version": 1,
+  "key_type": "Ed25519",
+  "key_id": "8fa3d1...",
+  "created_at": "2026-05-13T00:00:00Z",
+  "kdf": "scrypt",
+  "kdf_n": 131072,
+  "kdf_r": 8,
+  "kdf_p": 1,
+  "wrap_algorithm": "ChaCha20-Poly1305"
+}
+```
+
+El campo `magic` permite detectar formatos inválidos y `version` permite compatibilidad futura del sistema.
+
+---
+
+# **4. Ciclo de Vida de Llaves**
+
+### **4.1 Generación de llaves**
+
+Las llaves criptográficas se generan utilizando generadores criptográficamente seguros proporcionados por el sistema operativo.
+
+Cada usuario posee:
+- Una llave pública.
+- Una llave privada protegida mediante contraseña.
+
+La llave pública puede compartirse con otros usuarios autorizados mientras que la llave privada permanece cifrada dentro del keystore.
+
+---
+
+### **4.2 Uso de llaves**
+
+Las llaves privadas se utilizan únicamente para:
+- Firmar contenedores digitales.
+- Descifrar file keys compartidas.
+
+Las llaves públicas se utilizan para:
+- Verificar firmas.
+- Cifrar file keys para destinatarios autorizados.
+
+---
+
+### **4.3 Rotación de llaves**
+
+El sistema implementa una función `rotate_key()` para rotación de llaves privadas.
+
+El flujo consiste en:
+
+1. Recuperar la llave antigua mediante contraseña.
+2. Generar una nueva llave criptográfica del mismo tipo.
+3. Crear un nuevo keystore protegido con una nueva contraseña.
+4. Asignar un nuevo `key_id`.
+
+La nueva llave pública debe redistribuirse a los usuarios autorizados.
+
+---
+
+### **4.4 Compromiso de llaves**
+
+Si una llave privada se considera comprometida:
+- Debe dejar de utilizarse inmediatamente.
+- Se debe generar un nuevo par de llaves.
+- Los usuarios deberán actualizar las llaves públicas asociadas.
+
+El sistema asume que una llave comprometida deja de ser confiable.
+
+---
+
+# **5. Respaldo y Recuperación de Llaves**
+
+### **5.1 Respaldo**
+
+El sistema implementa `backup_keystore()` que realiza una copia completa del keystore cifrado.
+
+Debido a que las llaves privadas ya se encuentran protegidas mediante:
+- Scrypt
+- ChaCha20-Poly1305
+
+el respaldo puede almacenarse de forma segura sin exponer directamente la llave privada.
+
+La contraseña nunca se almacena dentro del backup.
+
+---
+
+### **5.2 Recuperación**
+
+La función `recover_private_key()` permite:
+
+1. Leer el keystore.
+2. Validar metadata y parámetros.
+3. Derivar nuevamente la clave usando Scrypt.
+4. Descifrar la llave privada.
+
+Si:
+- la contraseña es incorrecta
+- el ciphertext fue modificado
+- el nonce o salt fueron alterados
+
+el sistema genera:
+
+```python
+KeyManagerAuthError
+```
+
+y rechaza el acceso automáticamente.
+
+---
+
+# **6. Control de Acceso mediante Llaves**
+
+### **6.1 Acceso exclusivo**
+
+El sistema garantiza que:
+- Solo usuarios con la llave privada correcta pueden recuperar la file key.
+- Solo usuarios autorizados pueden descifrar el contenido.
+
+Esto mantiene el modelo híbrido definido en D3:
+- El archivo sigue cifrado mediante una file key simétrica.
+- La file key se cifra individualmente para cada destinatario autorizado.
+
+---
+
+### **6.2 Consistencia de identidad**
+
+Cada llave posee:
+- `user_id`
+- `key_id`
+- Tipo de llave asociado
+
+Esto evita:
+- Ambigüedad entre usuarios.
+- Uso accidental de llaves incorrectas.
+- Sustitución silenciosa de identidades.
+
+---
+
+# **7. Alineación con el Modelo de Amenazas (D1)**
+
+### **7.1 ¿Qué pasa si un atacante roba el keystore?**
+
+El atacante únicamente obtiene:
+- ciphertext cifrado
+- salt
+- nonce
+- metadata pública
+
+Sin la contraseña correcta no puede:
+- derivar la clave correcta
+- recuperar la llave privada
+- descifrar archivos compartidos
+
+---
+
+### **7.2 ¿Qué pasa si la contraseña es débil?**
+
+Una contraseña débil disminuye significativamente la seguridad del sistema.
+
+Aunque Scrypt incrementa el costo computacional de ataques de fuerza bruta:
+- No elimina completamente el riesgo.
+- El sistema depende parcialmente de que el usuario elija contraseñas seguras.
+
+---
+
+### **7.3 ¿Qué pasa si el dispositivo está comprometido?**
+
+El sistema NO protege contra:
+- Malware activo.
+- Keyloggers.
+- Compromiso total del sistema operativo.
+- Robo de contraseñas durante ejecución.
+
+Esto ya se encontraba fuera del alcance definido en D1.
+
+---
+
+# **8. Pruebas Requeridas**
+
+### **a) Contraseña correcta → acceso permitido**
+
+- El usuario ingresa la contraseña correcta.
+- La llave privada se descifra correctamente.
+- El sistema permite acceder a operaciones criptográficas.
+
+---
+
+### **b) Contraseña incorrecta → acceso denegado**
+
+- El usuario introduce una contraseña inválida.
+- ChaCha20-Poly1305 falla la autenticación.
+- El acceso es rechazado automáticamente.
+
+---
+
+### **c) Keystore modificado → fallo**
+
+El sistema detecta modificaciones usando la autenticación integrada de ChaCha20-Poly1305.
+
+Por ejemplo:
+- modificar `encrypted_key`
+- alterar `nonce`
+- cambiar `salt`
+
+provoca que:
+
+```python
+aead.decrypt()
+```
+
+genere un error `InvalidTag`, el cual es transformado en:
+
+```python
+KeyManagerAuthError
+```
+
+impidiendo recuperar la llave privada.
+
+---
+
+### **d) Respaldo y restauración**
+
+- El usuario restaura el keystore desde un backup.
+- Introduce la contraseña correcta.
+- La llave privada se recupera exitosamente.
+
+---
+
+### **e) Robo del keystore únicamente**
+
+- El atacante obtiene el directorio cifrado.
+- Sin la contraseña correcta:
+  - no puede derivar la clave
+  - no puede recuperar la llave privada
+  - no puede descifrar archivos
+
+---
+
+# **9. Discusión de Seguridad**
+
+### **9.1 ¿Por qué cifrar las llaves privadas?**
+
+Porque las llaves privadas representan la identidad criptográfica del usuario.
+
+Si un atacante obtiene acceso a ellas podría:
+- Descifrar archivos compartidos.
+- Firmar contenedores falsos.
+- Suplantar identidades legítimas.
+
+Por ello el sistema:
+- Nunca almacena llaves privadas en texto plano.
+- Usa Scrypt para derivar claves resistentes a fuerza bruta.
+- Usa ChaCha20-Poly1305 para confidencialidad e integridad autenticada.
+
+---
+
+### **9.2 ¿Qué ocurre si la contraseña es débil?**
+
+Aunque Scrypt incrementa significativamente el costo de ataques de fuerza bruta:
+- Una contraseña débil sigue siendo vulnerable.
+- La seguridad depende parcialmente del usuario.
+
+Por ello el sistema recomienda:
+- Contraseñas largas.
+- Uso de caracteres variados.
+- Evitar palabras comunes o predecibles.
+
+---
+
+### **9.3 Limitaciones del sistema**
+
+El sistema NO protege contra:
+- Dispositivos completamente comprometidos.
+- Robo de contraseñas mediante malware.
+- Usuarios que compartan sus credenciales.
+- Ataques físicos avanzados.
+- Capacidades de cómputo cuántico.
+
+Sin embargo, sí protege contra:
+- Robo del almacenamiento.
+- Manipulación del keystore.
+- Alteración de contenedores.
+- Acceso no autorizado sin la llave privada correcta.

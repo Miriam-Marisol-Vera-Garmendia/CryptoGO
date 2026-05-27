@@ -5,6 +5,8 @@ import io
 import json
 import os
 import struct
+import tempfile
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +44,11 @@ KDF_N                 = 2 ** 17
 KDF_R                 = 8
 KDF_P                 = 1
 ENCRYPTED_KEY_VERSION = 1
+
+GENERIC_FORMAT_ERROR = "El contenedor tiene un formato inválido o está corrupto."
+GENERIC_AUTH_ERROR = "Fallo de autenticación: clave incorrecta o contenedor manipulado."
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
+ALLOWED_FILE_EXTENSIONS = {".pdf", ".epub", ".png", ".jpg", ".jpeg", ".xps", ".txt"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -89,13 +96,6 @@ def _canonical_json(data: dict) -> bytes:
         separators=(",", ":"),
     ).encode("utf-8")
 
-
-def public_key_fingerprint(public_key_hex: str) -> str:
-    """
-    Huella digital de una clave pública ECIES (secp256k1).
-    SHA-256 del raw de la clave, truncado a 32 caracteres hex (16 bytes).
-    """
-    return hashlib.sha256(bytes.fromhex(public_key_hex)).hexdigest()[:32]
 
 
 def signer_id_from_public_key(ed25519_public_key_bytes: bytes) -> str:
@@ -158,7 +158,7 @@ def _build_signed_data(
 
     Datos firmados (en orden):
         header_bytes     — metadatos del contenedor (algoritmos, versión, fecha, etc.)
-        recipients_bytes — lista de recipients con key_ids y llaves cifradas
+        recipients_bytes — lista de recipients con llaves cifradas
         nonce            — nonce de ChaCha20-Poly1305
         ciphertext       — contenido cifrado del archivo
         tag              — etiqueta de autenticación AEAD (Poly1305)
@@ -382,12 +382,10 @@ def _serialize_recipients(recipients: list[dict]) -> bytes:
     buf = io.BytesIO()
     buf.write(struct.pack(">I", len(recipients)))
     for r in recipients:
-        id_b     = r["id"].encode("utf-8")
-        key_id_b = r["key_id"].encode("utf-8")
-        enc_key  = r["encrypted_key"]
-        buf.write(struct.pack(">H", len(id_b)));     buf.write(id_b)
-        buf.write(struct.pack(">H", len(key_id_b))); buf.write(key_id_b)
-        buf.write(struct.pack(">I", len(enc_key)));  buf.write(enc_key)
+        id_b    = r["id"].encode("utf-8")
+        enc_key = r["encrypted_key"]
+        buf.write(struct.pack(">H", len(id_b)));    buf.write(id_b)
+        buf.write(struct.pack(">I", len(enc_key))); buf.write(enc_key)
     return buf.getvalue()
 
 
@@ -418,7 +416,6 @@ def _deserialize_recipients(data: bytes) -> list[dict]:
 
         recipients.append({
             "id":            _read(">H", "id").decode("utf-8"),
-            "key_id":        _read(">H", "key_id").decode("utf-8"),
             "encrypted_key": _read(">I", "encrypted_key"),
         })
 
@@ -453,8 +450,11 @@ def _write_container(
          ├── authentication_tag — tag Poly1305
          └── signature         — firma Ed25519 de 64 bytes (raw)
     """
-    tmp_dir = container_dir.parent / f".tmp_{container_dir.name}_{os.getpid()}"
-    tmp_dir.mkdir(parents=True, exist_ok=False)
+    tmp_dir_str = tempfile.mkdtemp(
+        prefix=f".tmp_{container_dir.name}_", 
+        dir=container_dir.parent
+    )
+    tmp_dir = Path(tmp_dir_str)
     try:
         (tmp_dir / "header").write_bytes(header_bytes)
         (tmp_dir / "recipients").write_bytes(recipients_bytes)
@@ -464,7 +464,6 @@ def _write_container(
         (tmp_dir / "signature").write_bytes(signature)
         tmp_dir.rename(container_dir)
     except Exception:
-        import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
 
@@ -563,16 +562,14 @@ def encrypt_file_for_recipients(
     nonce    = os.urandom(NONCE_SIZE_BYTES)
 
     # ── 3. Construir lista de recipients ────────────────────────────────────
-    recipients   = []
-    seen_key_ids = set()
+    recipients  = []
+    seen_user_ids = set()
     for user_id, public_key_hex in recipient_public_keys.items():
-        key_id = public_key_fingerprint(public_key_hex)
-        if key_id in seen_key_ids:
+        if user_id in seen_user_ids:
             raise ValueError(GENERIC_FORMAT_ERROR)
-        seen_key_ids.add(key_id)
+        seen_user_ids.add(user_id)
         recipients.append({
             "id":            user_id,
-            "key_id":        key_id,
             "encrypted_key": ecies_encrypt(public_key_hex, file_key),
         })
 
@@ -657,38 +654,37 @@ def decrypt_file_for_recipient(
     header_bytes, recipients_bytes, nonce, ciphertext, tag, signature = \
         _read_container(container_dir)
 
-    # ── 2. Validar formato del header ────────────────────────────────────────
+    # ── 2. VERIFICAR FIRMA ANTES DE CUALQUIER PARSEO ─────────────────────────
+    signed_data = _build_signed_data(header_bytes, recipients_bytes, nonce, ciphertext, tag)
+    verify_signature(signed_data, signature, signing_public_key)
+    # Si verify_signature no lanza excepción, la firma es válida → continuar
+
+    # ── 3. Validar formato del header y deserializar ─────────────────────────
     header     = _validate_header(header_bytes)
     recipients = _deserialize_recipients(recipients_bytes)
 
     if header["recipients_count"] != len(recipients):
         raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
 
-    # ── 3. VERIFICAR FIRMA ANTES DE DESCIFRAR ────────────────────────────────
-    signed_data = _build_signed_data(header_bytes, recipients_bytes, nonce, ciphertext, tag)
-    verify_signature(signed_data, signature, signing_public_key)
-    # Si verify_signature no lanza excepción, la firma es válida → continuar
-
     # ── 4. Localizar entrada del destinatario ────────────────────────────────
-    my_key_id = public_key_fingerprint(recipient_public_key_hex)
-    entry     = next((r for r in recipients if r["key_id"] == my_key_id), None)
-    if entry is None:
-        raise HybridVaultFormatError(
-            GENERIC_FORMAT_ERROR
-        )
+    # Intenta descifrar con cada recipient hasta encontrar el correcto
+    entry = None
+    file_key = None
+    for r in recipients:
+        try:
+            file_key = ecies_decrypt(recipient_private_key_hex, r["encrypted_key"])
+            if len(file_key) == KEY_SIZE_BYTES:
+                entry = r
+                break
+        except Exception:
+            continue
 
-    # ── 5. Recuperar file_key con ECIES ──────────────────────────────────────
-    try:
-        file_key = ecies_decrypt(recipient_private_key_hex, entry["encrypted_key"])
-    except Exception as exc:
+    if entry is None or file_key is None:
         raise HybridVaultAuthenticationError(
             GENERIC_AUTH_ERROR
-        ) from exc
+        )
 
-    if len(file_key) != KEY_SIZE_BYTES:
-        raise HybridVaultFormatError(GENERIC_FORMAT_ERROR)
-
-    # ── 6. Descifrar con AEAD ────────────────────────────────────────────────
+    # ── 5. Descifrar con AEAD ────────────────────────────────────────────────
     aad      = header_bytes + recipients_bytes
     combined = ciphertext + tag
     try:
@@ -710,7 +706,7 @@ def decrypt_file_for_recipient(
         "original_filename": header.get("original_filename"),
         "created_at":        header.get("created_at"),
         "signer_id":         header.get("signer_id"),
-        "recipients":        [{"id": r["id"], "key_id": r["key_id"]} for r in recipients],
+        "recipients":        [{"id": r["id"]} for r in recipients],
         "plaintext_size":    header.get("plaintext_size"),
     }
 
@@ -732,6 +728,6 @@ def get_container_info(container_dir: str | Path) -> dict:
         "container_version": header.get("container_version"),
         "signature_algorithm": header.get("signature_algorithm"),
         "signer_id":         header.get("signer_id"),
-        "recipients":        [{"id": r["id"], "key_id": r["key_id"]} for r in recipients],
+        "recipients":        [{"id": r["id"]} for r in recipients],
         "plaintext_size":    header.get("plaintext_size"),
     }
