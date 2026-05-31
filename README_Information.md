@@ -842,3 +842,44 @@ Sin embargo, sí protege contra:
 - Manipulación del keystore.
 - Alteración de contenedores.
 - Acceso no autorizado sin la llave privada correcta.
+
+---
+
+# **D Final - Prácticas de Software Seguro e Implementación Reforzada**
+
+## **1. Estrategia de Canonicalización**
+
+### **1.1 Propósito**
+Al aplicar firmas digitales sobre estructuras de datos compuestas (como diccionarios JSON con metadatos o listas de destinatarios), es fundamental asegurar que los bytes que se firman sean exactamente idénticos en el emisor y en el receptor. 
+Si el emisor firma un JSON con un orden de claves o espaciado específicos y el receptor los procesa con un orden o espaciado diferente, el hash cambiará y la verificación de la firma fallará por discrepancia de formato, aunque el contenido no haya sido modificado.
+
+### **1.2 Implementación**
+Para garantizar una serialización determinista y evitar fallos por formato, el sistema implementa la función `_canonical_json` tanto en `hybrid_vault.py` como en `key_manager.py`:
+
+```python
+def _canonical_json(data: dict) -> bytes:
+    return json.dumps(
+        data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+```
+
+Esta función asegura un formato uniforme bajo las siguientes reglas:
+* **Ordenamiento de claves (`sort_keys=True`):** Las claves se escriben siempre en orden alfabético estricto, independientemente del orden de inserción en memoria.
+* **Remoción de espacios (`separators=(",", ":")`):** Elimina cualquier espacio en blanco redundante entre llaves y valores para evitar discrepancias de formato.
+* **Codificación consistente (`ensure_ascii=False` y `.encode("utf-8")`):** Evita el escapado de caracteres no-ASCII y genera una secuencia estándar de bytes en UTF-8 para firmas uniformes.
+
+## **2. Hallazgos de la Auditoría de Seguridad**
+
+Durante el desarrollo y análisis manual del código fuente de la aplicación, se detectaron e implementaron las siguientes mejoras de seguridad:
+
+### **2.1 Mitigación de Fuerza Bruta**
+* **Hallazgo:** Si el keystore de llaves privadas es comprometido, un atacante con acceso local podría intentar descifrar la llave privada mediante ataques sistemáticos de fuerza bruta en memoria.
+* **Mitigación:** Se implementó un control en la interfaz gráfica (`gui.py`) que registra los intentos de descifrado fallidos. Tras acumular 10 intentos fallidos, el sistema restringe el acceso durante 5 minutos. Este estado se almacena de forma persistente en `lockout.json` para evitar que reiniciar la aplicación evada el bloqueo.
+
+### **2.2 Prevención de Fugas de Información por Mensajes de Error**
+* **Hallazgo:** Las excepciones técnicas de bajo nivel (como `InvalidTag`) exponen información de depuración detallada sobre la causa o el punto exacto de falla en el flujo criptográfico, lo cual podría ser explotado por un atacante para deducir secretos.
+* **Mitigación:** Se implementó un esquema de tipo "fail-closed", es decir que cualquier excepción de autenticación o firma se intercepta y se traduce a un mensaje genérico seguro para el usuario en la interfaz. El error original y el stack trace se escriben de manera privada únicamente en el archivo local de diagnóstico `security.log` con acceso restringido.
+
